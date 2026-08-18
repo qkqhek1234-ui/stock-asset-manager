@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+    <linearGradient id="chartGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#3b82f6" />
+    </linearGradient>
+    <linearGradient id="glowGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.3" />
+      <stop offset="100%" stop-color="#38bdf8" stop-opacity="0" />
+    </linearGradient>
+  </defs>
+
+  <!-- App Icon Background (Rounded Squircle) -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)" stroke="#334155" stroke-width="8" />
+
+  <!-- Inner Soft Glow Area -->
+  <path d="M 96 360 L 192 280 L 288 320 L 416 160 L 416 380 L 96 380 Z" fill="url(#glowGrad)" />
+
+  <!-- Trend Line -->
+  <path d="M 96 360 L 192 280 L 288 320 L 416 160" fill="none" stroke="url(#chartGrad)" stroke-width="24" stroke-linecap="round" stroke-linejoin="round" />
+
+  <!-- Data Nodes -->
+  <circle cx="96" cy="360" r="14" fill="#38bdf8" />
+  <circle cx="192" cy="280" r="14" fill="#38bdf8" />
+  <circle cx="288" cy="320" r="14" fill="#38bdf8" />
+  <circle cx="416" cy="160" r="20" fill="#f8fafc" stroke="#38bdf8" stroke-width="8" />
+
+  <!-- Arrow Indicator -->
+  <polygon points="400,120 440,120 440,160" fill="#38bdf8" />
+</svg>

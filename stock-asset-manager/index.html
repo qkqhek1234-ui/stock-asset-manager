@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="dark" data-color-style="global">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>주식 자산관리 (Stock Asset Manager)</title>
+  
+  <!-- PWA & Mobile Web App Meta -->
+  <meta name="theme-color" content="#0b0f17">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="주식자산">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📈</text></svg>">
+
+  <!-- Stylesheets -->
+  <link rel="stylesheet" href="css/theme.css">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/components.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Navigation Bar (Desktop Sidebar / Mobile Bottom Bar) -->
+    <nav class="nav-bar">
+      <div class="nav-brand-desktop">
+        <span>📈</span>
+        <span>주식 자산관리</span>
+      </div>
+      <button class="nav-item active" data-view="dashboard">
+        <span class="nav-icon">📊</span>
+        <span>대시보드</span>
+      </button>
+      <button class="nav-item" data-view="portfolio">
+        <span class="nav-icon">💼</span>
+        <span>포트폴리오</span>
+      </button>
+      <button class="nav-item" data-view="transactions">
+        <span class="nav-icon">📝</span>
+        <span>매매일지</span>
+      </button>
+      <button class="nav-item" data-view="analytics">
+        <span class="nav-icon">📈</span>
+        <span>성과분석</span>
+      </button>
+      <button class="nav-item" data-view="settings">
+        <span class="nav-icon">⚙️</span>
+        <span>설정</span>
+      </button>
+    </nav>
+
+    <!-- Content Area -->
+    <div class="content-wrapper">
+      <header class="app-header">
+        <div class="brand-section mobile-only-brand">
+          <span class="brand-logo">📈</span>
+          <h1 class="brand-title">주식 자산관리</h1>
+        </div>
+      </header>
+
+      <main class="app-main">
+        <section id="view-content"></section>
+      </main>
+    </div>
+  </div>
+
+  <!-- Reusable Modal Container -->
+  <div id="app-modal" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modal-title" class="modal-title"></h3>
+        <button id="modal-close-btn" class="modal-close">✕</button>
+      </div>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+
+  <!-- Standalone High-Performance Script -->
+  <script src="js/bundle.js"></script>
+
+  <!-- PWA Service Worker Registration -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./service-worker.js')
+          .then((reg) => console.log('PWA ServiceWorker registered with scope:', reg.scope))
+          .catch((err) => console.log('PWA ServiceWorker notice:', err));
+      });
+    }
+  </script>
+</body>
+</html>

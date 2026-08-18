@@ -1,0 +1,88 @@
+/* ==========================================================================
+   Stock Asset Manager - Theme & Design Tokens
+   Modern, Clean, High-Contrast Dark & Light Fintech Theme
+   ========================================================================== */
+
+:root {
+  /* Color Palette - Dark Mode (Default) */
+  --bg-primary: #0b0f17;
+  --bg-secondary: #131b26;
+  --bg-tertiary: #1b2636;
+  --bg-card: #151e2d;
+  --bg-card-hover: #1c273a;
+  --bg-glass: rgba(21, 30, 45, 0.85);
+
+  --border-subtle: #223046;
+  --border-active: #3b82f6;
+
+  --text-main: #f1f5f9;
+  --text-muted: #94a3b8;
+  --text-dim: #64748b;
+
+  /* Financial Indicators (Default Global: Green=Up, Red=Down; Switchable to KR style) */
+  --color-profit: #10b981;
+  --color-profit-bg: rgba(16, 185, 129, 0.12);
+  --color-loss: #ef4444;
+  --color-loss-bg: rgba(239, 68, 68, 0.12);
+
+  --color-accent: #3b82f6;
+  --color-accent-hover: #2563eb;
+  --color-accent-bg: rgba(59, 130, 246, 0.12);
+
+  --color-warning: #f59e0b;
+  --color-dividend: #8b5cf6;
+
+  /* Typography & Spacing */
+  --font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-full: 9999px;
+
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px 0 rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 10px 25px -3px rgba(0, 0, 0, 0.5);
+
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.25s ease;
+}
+
+/* Light Theme Variables */
+[data-theme="light"] {
+  --bg-primary: #f8fafc;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f1f5f9;
+  --bg-card: #ffffff;
+  --bg-card-hover: #f8fafc;
+  --bg-glass: rgba(255, 255, 255, 0.9);
+
+  --border-subtle: #e2e8f0;
+  --border-active: #2563eb;
+
+  --text-main: #0f172a;
+  --text-muted: #475569;
+  --text-dim: #94a3b8;
+
+  --color-profit: #059669;
+  --color-profit-bg: rgba(5, 150, 105, 0.1);
+  --color-loss: #dc2626;
+  --color-loss-bg: rgba(220, 38, 38, 0.1);
+
+  --color-accent: #2563eb;
+  --color-accent-hover: #1d4ed8;
+  --color-accent-bg: rgba(37, 99, 235, 0.08);
+
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px 0 rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 10px 25px -3px rgba(0, 0, 0, 0.1);
+}
+
+/* Korean Stock Color Option (Red=Up, Blue=Down) */
+[data-color-style="korean"] {
+  --color-profit: #ef4444;
+  --color-profit-bg: rgba(239, 68, 68, 0.12);
+  --color-loss: #3b82f6;
+  --color-loss-bg: rgba(59, 130, 246, 0.12);
+}
