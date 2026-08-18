@@ -316,6 +316,93 @@
   };
 
   // =========================================================================
+  // 2.5 STOCK LOGO SERVICE
+  // =========================================================================
+  const StockLogoService = {
+    brandColors: {
+      AAPL: '#94a3b8',
+      MSFT: '#0284c7',
+      NVDA: '#10b981',
+      GOOGL: '#ea4335',
+      AMZN: '#f59e0b',
+      TSLA: '#ef4444',
+      META: '#3b82f6',
+      DELL: '#0ea5e9',
+      AVGO: '#ef4444',
+      ASML: '#3b82f6',
+      HWM: '#6366f1',
+      GE: '#2563eb',
+      VEEV: '#f97316',
+      MKSI: '#06b6d4',
+      SCHD: '#0284c7',
+      QQQ: '#8b5cf6',
+      SPY: '#10b981',
+      VOO: '#059669',
+      IVV: '#047857',
+      SHV: '#64748b',
+      KRW_CASH: '#10b981',
+      USD_CASH: '#38bdf8'
+    },
+
+    getLogoUrl(ticker, market) {
+      if (!ticker) return null;
+      const clean = ticker.trim().toUpperCase();
+      if (clean === 'KRW_CASH' || clean === 'USD_CASH' || market === 'CASH') return null;
+      if (clean.length === 6 && !isNaN(clean)) return null; // Korean tickers
+      // Parqet Logo CDN: covers US stocks, ETFs, etc.
+      return `https://assets.parqet.com/logos/symbol/${clean}?format=png`;
+    },
+
+    getFallbackBadge(ticker, name, market, color) {
+      const clean = (ticker || '').trim().toUpperCase();
+      const n = (name || '').toUpperCase();
+
+      if (clean === 'USD_CASH' || (market === 'CASH' && (n.includes('달러') || clean.includes('USD')))) {
+        return { text: '$', bg: 'linear-gradient(135deg, #0284c7, #38bdf8)', isIcon: true, icon: '💲' };
+      }
+      if (clean === 'KRW_CASH' || market === 'CASH') {
+        return { text: '₩', bg: 'linear-gradient(135deg, #059669, #34d399)', isIcon: true, icon: '💵' };
+      }
+      if (clean === '005930' || n.includes('삼성전자')) {
+        return { text: '삼전', bg: '#0284c7', isIcon: false };
+      }
+      if (clean.includes('KODEX') || n.includes('KODEX')) {
+        return { text: 'KODEX', bg: '#dc2626', isIcon: false };
+      }
+      if (clean.includes('TIGER') || n.includes('TIGER')) {
+        return { text: 'TIGER', bg: '#ea580c', isIcon: false };
+      }
+      if (clean.includes('RISE') || n.includes('RISE') || n.includes('KBSTAR')) {
+        return { text: 'RISE', bg: '#4f46e5', isIcon: false };
+      }
+      if (clean.includes('ACE') || n.includes('ACE')) {
+        return { text: 'ACE', bg: '#0891b2', isIcon: false };
+      }
+      if (clean.includes('SCHD') || n.includes('SCHWAB')) {
+        return { text: 'SCHD', bg: '#0284c7', isIcon: false };
+      }
+      if (clean.includes('ISHARES') || n.includes('ISHARES')) {
+        return { text: 'iSh', bg: '#1e293b', isIcon: false };
+      }
+      const label = clean.length <= 4 ? clean : clean.slice(0, 3);
+      const bg = color || this.brandColors[clean] || '#334155';
+      return { text: label, bg, isIcon: false };
+    },
+
+    renderAvatarHtml(ticker, name, market, color = '', sizeClass = '') {
+      const logoUrl = this.getLogoUrl(ticker, market);
+      const badge = this.getFallbackBadge(ticker, name, market, color);
+      const bgStyle = typeof badge.bg === 'string' && badge.bg.includes('gradient') ? `background: ${badge.bg};` : `background-color: ${badge.bg};`;
+      return `
+        <div class="ticker-logo-avatar ${sizeClass}" style="${bgStyle}">
+          ${logoUrl ? `<img src="${logoUrl}" onerror="this.style.display='none'; if(this.nextElementSibling) this.nextElementSibling.style.display='flex';" alt="${ticker}" class="ticker-logo-img">` : ''}
+          <span class="ticker-logo-fallback" style="${logoUrl ? 'display:none;' : ''}">${badge.icon || badge.text}</span>
+        </div>
+      `;
+    }
+  };
+
+  // =========================================================================
   // 3. STOCK SERVICE
   // =========================================================================
   const StockService = {
@@ -770,37 +857,52 @@
           </div>
         </div>
 
-        <div class="grid-2col">
+        <div class="grid-2col" style="align-items: start;">
           <div class="card">
-            <div class="card-header"><span class="card-title">📊 종목별 자산 비중</span></div>
+            <div class="card-header" style="margin-bottom: 0.5rem;">
+              <span class="card-title">📊 종목별 자산 비중</span>
+              <span style="font-size: 0.74rem; color: var(--text-dim);">차트 조각 터치/호버시 상세정보</span>
+            </div>
             <div class="chart-container">
-              <canvas id="allocation-canvas" width="260" height="260" style="max-width: 100%; height: auto;"></canvas>
-              <div id="chart-legend" class="chart-legend"></div>
+              <div class="donut-chart-wrapper">
+                <canvas id="allocation-canvas" style="cursor: pointer;"></canvas>
+                <div id="donut-center-overlay" class="donut-center-overlay"></div>
+              </div>
+              <div id="chart-legend" class="chart-legend-grid"></div>
             </div>
           </div>
 
           <div class="card">
             <div class="card-header"><span class="card-title">🏆 보유 비중 상위 종목</span></div>
-            <div style="display: flex; flex-direction: column; gap: 0.75rem;">
-              ${holdings.length === 0 ? '<p style="text-align: center; color: var(--text-dim); padding: 2rem;">보유 종목이 없습니다.</p>' : ''}
-              ${holdings.slice(0, 5).map((h) => `
-                <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.65rem 0.75rem; background: var(--bg-secondary); border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
-                  <div>
-                    <div style="display: flex; align-items: center; gap: 0.4rem;">
-                      <span class="badge ${h.market === 'US' ? 'badge-us' : 'badge-kr'}">${h.market}</span>
-                      <strong style="font-size: 0.92rem;">${h.name}</strong>
-                      <span style="font-size: 0.75rem; color: var(--text-dim); font-family: var(--font-mono);">${h.ticker}</span>
+            <div style="display: flex; flex-direction: column; gap: 0.65rem;">
+              ${holdings.length === 0 ? '<p style="text-align: center; color: var(--text-dim); padding: 2rem;">보유 자산이 없습니다.</p>' : ''}
+              ${holdings.slice(0, 7).map((h) => {
+                const isCash = h.market === 'CASH';
+                const badgeClass = isCash ? 'badge-cash' : (h.market === 'US' ? 'badge-us' : 'badge-kr');
+                const badgeText = isCash ? '현금' : h.market;
+                return `
+                  <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.65rem 0.75rem; background: var(--bg-secondary); border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
+                    <div style="display: flex; align-items: center; gap: 0.55rem; min-width: 0;">
+                      ${StockLogoService.renderAvatarHtml(h.ticker, h.name, h.market, '', 'sm')}
+                      <div style="min-width: 0;">
+                        <div style="display: flex; align-items: center; gap: 0.35rem;">
+                          <span class="badge ${badgeClass}">${badgeText}</span>
+                          <strong style="font-size: 0.92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${h.name}</strong>
+                        </div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.15rem;">
+                          ${h.ticker} · 비중 <strong style="color: var(--text-main);">${h.weightPercent.toFixed(1)}%</strong>
+                        </div>
+                      </div>
                     </div>
-                    <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.2rem;">
-                      보유 ${CalculatorService.formatNumber(h.quantity, h.market === 'US' ? 2 : 0)}주 · 비중 ${h.weightPercent.toFixed(1)}%
+                    <div style="text-align: right; flex-shrink: 0;">
+                      <div style="font-size: 0.92rem; font-weight: 700; font-family: var(--font-mono);">${CalculatorService.formatCurrency(h.marketValueKRW, 'KRW')}</div>
+                      ${!isCash ? `
+                        <div style="font-size: 0.78rem; font-weight: 600;" class="${h.profit >= 0 ? 'profit-text' : 'loss-text'}">${CalculatorService.formatPercent(h.returnRate)}</div>
+                      ` : '<div style="font-size: 0.74rem; color: var(--text-dim);">원금보존</div>'}
                     </div>
                   </div>
-                  <div style="text-align: right;">
-                    <div style="font-size: 0.95rem; font-weight: 700; font-family: var(--font-mono);">${CalculatorService.formatCurrency(h.marketValueKRW, 'KRW')}</div>
-                    <div style="font-size: 0.8rem; font-weight: 600;" class="${h.profit >= 0 ? 'profit-text' : 'loss-text'}">${CalculatorService.formatPercent(h.returnRate)}</div>
-                  </div>
-                </div>
-              `).join('')}
+                `;
+              }).join('')}
             </div>
           </div>
         </div>
@@ -808,50 +910,246 @@
 
       container.querySelector('#btn-quick-refresh')?.addEventListener('click', () => this.refreshQuotes());
       container.querySelector('#btn-quick-add')?.addEventListener('click', () => this.openAddModal());
-      this.drawDonutChart(container, holdings);
+      this.drawDonutChart(container, holdings, summary);
     }
 
-    drawDonutChart(container, holdings) {
+    drawDonutChart(container, holdings, summary = {}) {
+      const wrapper = container.querySelector('.donut-chart-wrapper');
       const canvas = container.querySelector('#allocation-canvas');
+      const centerOverlay = container.querySelector('#donut-center-overlay');
       const legendEl = container.querySelector('#chart-legend');
       if (!canvas || !holdings.length) return;
 
+      const colors = [
+        '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899',
+        '#06b6d4', '#f97316', '#14b8a6', '#6366f1', '#84cc16',
+        '#a855f7', '#e11d48', '#0284c7', '#d97706', '#15803d',
+        '#7c3aed', '#0ea5e9', '#10b981', '#f43f5e', '#eab308'
+      ];
+
+      // Responsive size calculation & Retina high-DPI scaling
+      const wrapperWidth = wrapper ? wrapper.clientWidth : 340;
+      const size = Math.min(360, Math.max(290, wrapperWidth - 10));
+      const dpr = window.devicePixelRatio || 1;
+
+      canvas.width = size * dpr;
+      canvas.height = size * dpr;
+      canvas.style.width = `${size}px`;
+      canvas.style.height = `${size}px`;
+
       const ctx = canvas.getContext('2d');
-      const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#14b8a6', '#f97316'];
-      const cx = canvas.width / 2, cy = canvas.height / 2, r = cx - 15, ir = r * 0.62;
+      let activeIndex = -1;
 
-      let startAngle = -Math.PI / 2, legendHtml = '';
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const cx = size / 2;
+      const cy = size / 2;
+      const baseR = (size / 2) - 14;
+      const baseIr = baseR * 0.58;
 
-      holdings.forEach((item, idx) => {
+      let curAngle = -Math.PI / 2;
+      const slices = holdings.map((item, idx) => {
         const color = colors[idx % colors.length];
-        const endAngle = startAngle + (item.weightPercent / 100) * (Math.PI * 2);
-
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, startAngle, endAngle);
-        ctx.arc(cx, cy, ir, endAngle, startAngle, true);
-        ctx.closePath();
-        ctx.fillStyle = color;
-        ctx.fill();
-        ctx.strokeStyle = '#151e2d';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        startAngle = endAngle;
-        legendHtml += `<div class="legend-item"><span class="legend-color" style="background-color: ${color};"></span><span>${item.name} (${item.weightPercent.toFixed(1)}%)</span></div>`;
+        const sweep = (item.weightPercent / 100) * (Math.PI * 2);
+        const startAngle = curAngle;
+        const endAngle = curAngle + sweep;
+        curAngle = endAngle;
+        return { item, idx, color, startAngle, endAngle, midAngle: (startAngle + endAngle) / 2 };
       });
 
-      ctx.fillStyle = '#94a3b8';
-      ctx.font = '12px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('총 자산 비중', cx, cy - 8);
+      const renderCanvas = () => {
+        ctx.save();
+        ctx.scale(dpr, dpr);
+        ctx.clearRect(0, 0, size, size);
 
-      ctx.fillStyle = '#f1f5f9';
-      ctx.font = 'bold 14px monospace';
-      ctx.fillText(`${holdings.length}개 종목`, cx, cy + 12);
+        slices.forEach(slice => {
+          const isHovered = (slice.idx === activeIndex);
+          const r = isHovered ? baseR + 7 : baseR;
+          const ir = isHovered ? baseIr - 2 : baseIr;
 
-      if (legendEl) legendEl.innerHTML = legendHtml;
+          // Draw slice sector
+          ctx.save();
+          if (isHovered) {
+            ctx.shadowColor = slice.color;
+            ctx.shadowBlur = 14;
+          }
+          ctx.beginPath();
+          ctx.arc(cx, cy, r, slice.startAngle, slice.endAngle);
+          ctx.arc(cx, cy, ir, slice.endAngle, slice.startAngle, true);
+          ctx.closePath();
+          ctx.fillStyle = slice.color;
+          ctx.globalAlpha = (activeIndex !== -1 && !isHovered) ? 0.72 : 1.0;
+          ctx.fill();
+          ctx.strokeStyle = '#0f172a';
+          ctx.lineWidth = isHovered ? 3 : 2;
+          ctx.stroke();
+          ctx.restore();
+
+          // In-slice text labeling
+          if (slice.item.weightPercent >= 3.2 || isHovered) {
+            const midR = (r + ir) / 2;
+            const tx = cx + Math.cos(slice.midAngle) * midR;
+            const ty = cy + Math.sin(slice.midAngle) * midR;
+
+            let label = slice.item.ticker;
+            if (slice.item.market === 'CASH') {
+              label = slice.item.currency === 'USD' ? '달러' : '원화';
+            } else if (label.includes('KODEX')) {
+              label = 'KODEX';
+            } else if (label.length > 5) {
+              label = label.slice(0, 5);
+            }
+
+            ctx.save();
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
+            ctx.shadowBlur = 4;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 1;
+            ctx.fillStyle = '#ffffff';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            if (slice.item.weightPercent >= 5.5 || isHovered) {
+              ctx.font = 'bold 11px monospace';
+              ctx.fillText(label, tx, ty - 6);
+              ctx.font = 'bold 10px sans-serif';
+              ctx.fillText(`${slice.item.weightPercent.toFixed(1)}%`, tx, ty + 7);
+            } else {
+              ctx.font = 'bold 9.5px sans-serif';
+              ctx.fillText(`${slice.item.weightPercent.toFixed(1)}%`, tx, ty);
+            }
+            ctx.restore();
+          }
+        });
+
+        ctx.restore();
+      };
+
+      const updateCenterOverlay = () => {
+        if (!centerOverlay) return;
+        if (activeIndex === -1) {
+          centerOverlay.innerHTML = `
+            <div style="font-size: 0.74rem; color: var(--text-muted); font-weight: 600;">총 자산 비중</div>
+            <div style="font-size: 1.18rem; font-weight: 800; font-family: var(--font-mono); color: var(--text-main); margin: 0.15rem 0;">
+              ${holdings.length}개 자산
+            </div>
+            <div style="font-size: 0.8rem; color: #38bdf8; font-family: var(--font-mono); font-weight: 700;">
+              ${CalculatorService.formatCurrency(summary.totalMarketValueKRW || 0, 'KRW')}
+            </div>
+            <div style="font-size: 0.68rem; color: var(--text-dim); margin-top: 0.35rem;">터치/호버시 상세정보</div>
+          `;
+        } else {
+          const h = holdings[activeIndex];
+          const slice = slices[activeIndex];
+          centerOverlay.innerHTML = `
+            ${StockLogoService.renderAvatarHtml(h.ticker, h.name, h.market, slice.color, 'lg')}
+            <div style="font-size: 0.86rem; font-weight: 700; color: var(--text-main); max-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 0.2rem;">
+              ${h.name}
+            </div>
+            <div style="font-size: 0.72rem; color: var(--text-muted); font-family: var(--font-mono);">
+              ${h.ticker} · <strong style="color: ${slice.color};">${h.weightPercent.toFixed(1)}%</strong>
+            </div>
+            <div style="font-size: 0.88rem; font-weight: 800; font-family: var(--font-mono); color: var(--text-main); margin-top: 0.15rem;">
+              ${CalculatorService.formatCurrency(h.marketValueKRW, 'KRW')}
+            </div>
+          `;
+        }
+      };
+
+      const getSliceAtCoord = (clientX, clientY) => {
+        const rect = canvas.getBoundingClientRect();
+        const x = clientX - rect.left;
+        const y = clientY - rect.top;
+        const dx = x - (size / 2);
+        const dy = y - (size / 2);
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist < baseIr - 10 || dist > baseR + 18) return -1;
+
+        let angle = Math.atan2(dy, dx);
+        if (angle < -Math.PI / 2) angle += Math.PI * 2;
+
+        for (let i = 0; i < slices.length; i++) {
+          let s = slices[i].startAngle;
+          let e = slices[i].endAngle;
+          if (angle >= s && angle < e) return i;
+        }
+        return -1;
+      };
+
+      const setHoverIndex = (newIdx) => {
+        if (activeIndex === newIdx) return;
+        activeIndex = newIdx;
+        renderCanvas();
+        updateCenterOverlay();
+
+        if (legendEl) {
+          legendEl.querySelectorAll('.legend-grid-card').forEach((card, i) => {
+            if (i === activeIndex) {
+              card.classList.add('active');
+            } else {
+              card.classList.remove('active');
+            }
+          });
+        }
+      };
+
+      canvas.addEventListener('mousemove', (e) => {
+        const idx = getSliceAtCoord(e.clientX, e.clientY);
+        setHoverIndex(idx);
+      });
+
+      canvas.addEventListener('mouseleave', () => {
+        setHoverIndex(-1);
+      });
+
+      canvas.addEventListener('touchstart', (e) => {
+        if (e.touches.length > 0) {
+          const idx = getSliceAtCoord(e.touches[0].clientX, e.touches[0].clientY);
+          setHoverIndex(idx);
+        }
+      }, { passive: true });
+
+      canvas.addEventListener('touchmove', (e) => {
+        if (e.touches.length > 0) {
+          const idx = getSliceAtCoord(e.touches[0].clientX, e.touches[0].clientY);
+          setHoverIndex(idx);
+        }
+      }, { passive: true });
+
+      // Render initial canvas & center overlay
+      renderCanvas();
+      updateCenterOverlay();
+
+      // Render modern legend grid
+      if (legendEl) {
+        legendEl.innerHTML = holdings.map((h, idx) => {
+          const color = colors[idx % colors.length];
+          return `
+            <div class="legend-grid-card" data-idx="${idx}">
+              <div class="legend-card-left">
+                ${StockLogoService.renderAvatarHtml(h.ticker, h.name, h.market, color, 'sm')}
+                <div class="legend-card-info">
+                  <div class="legend-card-name">
+                    <span class="legend-dot" style="background-color: ${color};"></span>
+                    <strong>${h.name}</strong>
+                  </div>
+                  <div class="legend-card-ticker">${h.ticker}</div>
+                </div>
+              </div>
+              <div class="legend-card-right">
+                <div class="legend-card-val">${CalculatorService.formatCurrency(h.marketValueKRW, 'KRW')}</div>
+                <div class="legend-card-pct" style="color: ${color};">${h.weightPercent.toFixed(1)}%</div>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        legendEl.querySelectorAll('.legend-grid-card').forEach((card) => {
+          const idx = parseInt(card.dataset.idx, 10);
+          card.addEventListener('mouseenter', () => setHoverIndex(idx));
+          card.addEventListener('mouseleave', () => setHoverIndex(-1));
+          card.addEventListener('click', () => setHoverIndex(activeIndex === idx ? -1 : idx));
+        });
+      }
     }
 
     // --- VIEW 2: PORTFOLIO ---
@@ -937,11 +1235,16 @@
                 return `
                   <tr>
                     <td>
-                      <div style="display: flex; align-items: center; gap: 0.4rem;">
-                        <span class="badge ${badgeClass}">${badgeText}</span>
-                        <strong style="font-size: 0.93rem;">${h.name}</strong>
+                      <div style="display: flex; align-items: center; gap: 0.55rem;">
+                        ${StockLogoService.renderAvatarHtml(h.ticker, h.name, h.market, '', 'sm')}
+                        <div>
+                          <div style="display: flex; align-items: center; gap: 0.35rem;">
+                            <span class="badge ${badgeClass}">${badgeText}</span>
+                            <strong style="font-size: 0.93rem;">${h.name}</strong>
+                          </div>
+                          <div style="font-size: 0.75rem; color: var(--text-dim); font-family: var(--font-mono); margin-top: 0.15rem;">${h.ticker}</div>
+                        </div>
                       </div>
-                      <div style="font-size: 0.75rem; color: var(--text-dim); font-family: var(--font-mono); margin-top: 0.15rem;">${h.ticker}</div>
                     </td>
                     <td class="text-right" style="font-family: var(--font-mono); font-weight: 600; font-size: 0.9rem;">${qtyText}</td>
                     <td class="text-right" style="font-family: var(--font-mono); font-size: 0.88rem;">${priceText}</td>
@@ -1017,16 +1320,19 @@
             return `
               <div class="card mobile-stock-card" style="padding: 0.95rem 1rem;">
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.65rem;">
-                  <div>
-                    <div style="display: flex; align-items: center; gap: 0.35rem;">
-                      <span class="badge ${badgeClass}">${badgeText}</span>
-                      <strong style="font-size: 1rem; letter-spacing: -0.01em;">${h.name}</strong>
-                    </div>
-                    <div style="font-size: 0.75rem; color: var(--text-dim); font-family: var(--font-mono); margin-top: 0.15rem;">
-                      ${h.ticker} · 비중 <strong>${h.weightPercent.toFixed(1)}%</strong>
+                  <div style="display: flex; align-items: center; gap: 0.55rem; min-width: 0;">
+                    ${StockLogoService.renderAvatarHtml(h.ticker, h.name, h.market, '', 'sm')}
+                    <div style="min-width: 0;">
+                      <div style="display: flex; align-items: center; gap: 0.35rem;">
+                        <span class="badge ${badgeClass}">${badgeText}</span>
+                        <strong style="font-size: 1rem; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${h.name}</strong>
+                      </div>
+                      <div style="font-size: 0.75rem; color: var(--text-dim); font-family: var(--font-mono); margin-top: 0.15rem;">
+                        ${h.ticker} · 비중 <strong>${h.weightPercent.toFixed(1)}%</strong>
+                      </div>
                     </div>
                   </div>
-                  <div style="text-align: right;">
+                  <div style="text-align: right; flex-shrink: 0;">
                     <div style="font-weight: 700; font-size: 1.08rem; font-family: var(--font-mono);">${priceText}</div>
                     ${!isCash ? `
                       <div style="font-size: 0.78rem; font-weight: 600;" class="${isDayP ? 'profit-text' : 'loss-text'}">
