@@ -1,7 +1,6 @@
-const CACHE_NAME = 'stock-manager-pwa-v2';
+const CACHE_NAME = 'stock-manager-pwa-v3';
 const STATIC_ASSETS = [
   './',
-  './index.html',
   './manifest.json',
   './css/theme.css',
   './css/layout.css',
@@ -42,12 +41,20 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
 
-  // Do not cache API quote / search requests
+  // Do not intercept or cache API calls
   if (url.pathname.startsWith('/api/')) {
     return;
   }
 
-  // Handle local app assets
+  // Handle navigation requests (SPA / PWA root)
+  if (e.request.mode === 'navigate') {
+    e.respondWith(
+      fetch(e.request).catch(() => caches.match('./'))
+    );
+    return;
+  }
+
+  // Handle local app static assets
   if (e.request.method === 'GET' && url.origin === self.location.origin) {
     e.respondWith(
       caches.match(e.request).then((cachedResponse) => {

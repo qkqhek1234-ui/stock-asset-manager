@@ -1,7 +1,7 @@
 /**
- * Vercel Serverless API: /api/sync
- * Multi-Device Sync Key Storage (Zero-Config for User)
- * Supports GET (fetch data) and POST (save data)
+ * Vercel Serverless Function: /api/sync
+ * Multi-Device Sync Key Storage
+ * Uses Vercel KV / Upstash Redis for high-speed, private, 100% reliable cloud storage.
  */
 
 export default async function handler(req, res) {
@@ -13,71 +13,89 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  // 1. Handle GET: Fetch data by sync key
+  // Read Vercel KV / Upstash credentials from environment
+  const kvUrl = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+  const kvToken = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+
+  // 1. GET: Fetch data by sync key
   if (req.method === 'GET') {
     const key = (req.query.key || req.headers['x-sync-key'] || '').trim().toUpperCase();
     if (!key) {
-      return res.status(400).json({ error: 'Sync Key is required' });
+      return res.status(400).json({ error: '동기화 키가 필요합니다.' });
+    }
+
+    if (!kvUrl || !kvToken) {
+      // Guide user to connect Vercel KV in dashboard
+      return res.status(503).json({
+        error: 'Vercel KV 스토리지가 연결되지 않았습니다. Vercel 대시보드의 [Storage] 탭에서 무료 KV 데이터베이스를 프로젝트에 연결해주세요.'
+      });
     }
 
     try {
-      // Fetch from KV / Cloud Storage endpoint
-      const remoteUrl = `https://kvdb.io/4yKqP3kU7x5E9Z8mY2A1wN/${encodeURIComponent(key)}`;
-      const response = await fetch(remoteUrl, {
-        headers: { 'Accept': 'application/json' }
+      const fetchUrl = `${kvUrl.replace(/\/$/, '')}/get/${encodeURIComponent(key)}`;
+      const response = await fetch(fetchUrl, {
+        headers: {
+          Authorization: `Bearer ${kvToken}`,
+          Accept: 'application/json'
+        }
       });
 
-      if (response.status === 404) {
-        return res.status(404).json({ error: '해당 동기화 키에 저장된 데이터가 없습니다.' });
-      }
-
       if (!response.ok) {
-        return res.status(500).json({ error: '클라우드 데이터를 불러오는데 실패했습니다.' });
+        return res.status(response.status).json({ error: '클라우드 데이터를 불러오는데 실패했습니다.' });
       }
 
-      const data = await response.json();
-      return res.status(200).json(data);
+      const result = await response.json();
+      if (!result || result.result === null || result.result === undefined) {
+        return res.status(404).json({ error: '해당 키에 저장된 백업 데이터가 없습니다.' });
+      }
+
+      let payload = result.result;
+      if (typeof payload === 'string') {
+        try { payload = JSON.parse(payload); } catch (e) {}
+      }
+
+      return res.status(200).json(payload);
     } catch (error) {
       return res.status(500).json({ error: error.message });
     }
   }
 
-  // 2. Handle POST: Save data by sync key
+  // 2. POST: Save data by sync key
   if (req.method === 'POST') {
     const { key, payload } = req.body || {};
     const cleanKey = (key || '').trim().toUpperCase();
 
     if (!cleanKey) {
-      return res.status(400).json({ error: 'Sync Key is required' });
+      return res.status(400).json({ error: '동기화 키가 필요합니다.' });
+    }
+    if (!payload) {
+      return res.status(400).json({ error: '저장할 데이터가 없습니다.' });
     }
 
-    if (!payload) {
-      return res.status(400).json({ error: 'Payload data is required' });
+    if (!kvUrl || !kvToken) {
+      return res.status(503).json({
+        error: 'Vercel KV 스토리지가 연결되지 않았습니다. Vercel 대시보드의 [Storage] 탭에서 무료 KV 데이터베이스를 프로젝트에 연결해주세요.'
+      });
     }
 
     try {
-      const remoteUrl = `https://kvdb.io/4yKqP3kU7x5E9Z8mY2A1wN/${encodeURIComponent(cleanKey)}`;
-      const response = await fetch(remoteUrl, {
+      const dataToSave = JSON.stringify({
+        ...payload,
+        updatedAt: new Date().toISOString()
+      });
+
+      const setUrl = `${kvUrl.replace(/\/$/, '')}/set/${encodeURIComponent(cleanKey)}`;
+      const response = await fetch(setUrl, {
         method: 'POST',
         headers: {
+          Authorization: `Bearer ${kvToken}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          ...payload,
-          updatedAt: new Date().toISOString()
-        })
+        body: dataToSave
       });
 
       if (!response.ok) {
-        // Fallback with PUT
-        const putRes = await fetch(remoteUrl, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...payload, updatedAt: new Date().toISOString() })
-        });
-        if (!putRes.ok) {
-          return res.status(500).json({ error: '클라우드 저장에 실패했습니다.' });
-        }
+        return res.status(response.status).json({ error: '클라우드 저장에 실패했습니다.' });
       }
 
       return res.status(200).json({ success: true, key: cleanKey, savedAt: new Date().toISOString() });
