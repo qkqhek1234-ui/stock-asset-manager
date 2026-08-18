@@ -857,52 +857,32 @@
           </div>
         </div>
 
-        <div class="grid-2col" style="align-items: start;">
-          <div class="card">
-            <div class="card-header" style="margin-bottom: 0.5rem;">
-              <span class="card-title">📊 종목별 자산 비중</span>
-              <span style="font-size: 0.74rem; color: var(--text-dim);">차트 조각 터치/호버시 상세정보</span>
+        <!-- Full-Width Hero Card: Stock Allocation Donut Chart & Rich Legend -->
+        <div class="card" style="margin-top: 0.25rem;">
+          <div class="card-header" style="margin-bottom: 0.85rem; flex-wrap: wrap; gap: 0.5rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <span class="card-title" style="font-size: 1.15rem; font-weight: 700; color: var(--text-main);">📊 종목별 자산 배분 비중</span>
+              <span class="badge badge-secondary" style="font-size: 0.76rem;">총 ${holdings.length}개 자산</span>
             </div>
-            <div class="chart-container">
+            <span style="font-size: 0.78rem; color: var(--text-muted);">💡 차트 조각 또는 아래 목록을 터치/호버하면 상세 정보를 볼 수 있습니다</span>
+          </div>
+
+          <div class="chart-main-layout">
+            <!-- Left: Big Donut Canvas Area -->
+            <div class="chart-canvas-area">
               <div class="donut-chart-wrapper">
                 <canvas id="allocation-canvas" style="cursor: pointer;"></canvas>
                 <div id="donut-center-overlay" class="donut-center-overlay"></div>
               </div>
-              <div id="chart-legend" class="chart-legend-grid"></div>
             </div>
-          </div>
 
-          <div class="card">
-            <div class="card-header"><span class="card-title">🏆 보유 비중 상위 종목</span></div>
-            <div style="display: flex; flex-direction: column; gap: 0.65rem;">
-              ${holdings.length === 0 ? '<p style="text-align: center; color: var(--text-dim); padding: 2rem;">보유 자산이 없습니다.</p>' : ''}
-              ${holdings.slice(0, 7).map((h) => {
-                const isCash = h.market === 'CASH';
-                const badgeClass = isCash ? 'badge-cash' : (h.market === 'US' ? 'badge-us' : 'badge-kr');
-                const badgeText = isCash ? '현금' : h.market;
-                return `
-                  <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.65rem 0.75rem; background: var(--bg-secondary); border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
-                    <div style="display: flex; align-items: center; gap: 0.55rem; min-width: 0;">
-                      ${StockLogoService.renderAvatarHtml(h.ticker, h.name, h.market, '', 'sm')}
-                      <div style="min-width: 0;">
-                        <div style="display: flex; align-items: center; gap: 0.35rem;">
-                          <span class="badge ${badgeClass}">${badgeText}</span>
-                          <strong style="font-size: 0.92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${h.name}</strong>
-                        </div>
-                        <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.15rem;">
-                          ${h.ticker} · 비중 <strong style="color: var(--text-main);">${h.weightPercent.toFixed(1)}%</strong>
-                        </div>
-                      </div>
-                    </div>
-                    <div style="text-align: right; flex-shrink: 0;">
-                      <div style="font-size: 0.92rem; font-weight: 700; font-family: var(--font-mono);">${CalculatorService.formatCurrency(h.marketValueKRW, 'KRW')}</div>
-                      ${!isCash ? `
-                        <div style="font-size: 0.78rem; font-weight: 600;" class="${h.profit >= 0 ? 'profit-text' : 'loss-text'}">${CalculatorService.formatPercent(h.returnRate)}</div>
-                      ` : '<div style="font-size: 0.74rem; color: var(--text-dim);">원금보존</div>'}
-                    </div>
-                  </div>
-                `;
-              }).join('')}
+            <!-- Right: All Holdings Legend Cards Grid -->
+            <div class="chart-legend-area">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.65rem; font-size: 0.82rem; color: var(--text-muted); padding-bottom: 0.4rem; border-bottom: 1px solid var(--border-subtle);">
+                <span>자산 비중 순위 목록 (총 ${holdings.length}개)</span>
+                <span>총 평가금액: <strong style="color: var(--text-main); font-family: var(--font-mono);">${CalculatorService.formatCurrency(summary.totalMarketValueKRW || 0, 'KRW')}</strong></span>
+              </div>
+              <div id="chart-legend" class="chart-legend-grid"></div>
             </div>
           </div>
         </div>
@@ -928,8 +908,8 @@
       ];
 
       // Responsive size calculation & Retina high-DPI scaling
-      const wrapperWidth = wrapper ? wrapper.clientWidth : 340;
-      const size = Math.min(360, Math.max(290, wrapperWidth - 10));
+      const wrapperWidth = wrapper ? wrapper.clientWidth : 400;
+      const size = Math.min(410, Math.max(300, wrapperWidth - 10));
       const dpr = window.devicePixelRatio || 1;
 
       canvas.width = size * dpr;
@@ -943,7 +923,7 @@
       const cx = size / 2;
       const cy = size / 2;
       const baseR = (size / 2) - 14;
-      const baseIr = baseR * 0.58;
+      const baseIr = baseR * 0.56;
 
       let curAngle = -Math.PI / 2;
       const slices = holdings.map((item, idx) => {
@@ -962,40 +942,52 @@
 
         slices.forEach(slice => {
           const isHovered = (slice.idx === activeIndex);
-          const r = isHovered ? baseR + 7 : baseR;
+          const r = isHovered ? baseR + 8 : baseR;
           const ir = isHovered ? baseIr - 2 : baseIr;
 
           // Draw slice sector
           ctx.save();
           if (isHovered) {
             ctx.shadowColor = slice.color;
-            ctx.shadowBlur = 14;
+            ctx.shadowBlur = 16;
           }
           ctx.beginPath();
           ctx.arc(cx, cy, r, slice.startAngle, slice.endAngle);
           ctx.arc(cx, cy, ir, slice.endAngle, slice.startAngle, true);
           ctx.closePath();
           ctx.fillStyle = slice.color;
-          ctx.globalAlpha = (activeIndex !== -1 && !isHovered) ? 0.72 : 1.0;
+          ctx.globalAlpha = (activeIndex !== -1 && !isHovered) ? 0.68 : 1.0;
           ctx.fill();
           ctx.strokeStyle = '#0f172a';
           ctx.lineWidth = isHovered ? 3 : 2;
           ctx.stroke();
           ctx.restore();
 
-          // In-slice text labeling
-          if (slice.item.weightPercent >= 3.2 || isHovered) {
+          // In-slice smart text labeling
+          if (slice.item.weightPercent >= 3.0 || isHovered) {
             const midR = (r + ir) / 2;
             const tx = cx + Math.cos(slice.midAngle) * midR;
             const ty = cy + Math.sin(slice.midAngle) * midR;
 
             let label = slice.item.ticker;
+            const nm = (slice.item.name || '').toUpperCase();
             if (slice.item.market === 'CASH') {
-              label = slice.item.currency === 'USD' ? '달러' : '원화';
-            } else if (label.includes('KODEX')) {
-              label = 'KODEX';
-            } else if (label.length > 5) {
-              label = label.slice(0, 5);
+              label = slice.item.currency === 'USD' ? '달러현금' : '원화현금';
+            } else if (label.length === 6 && !isNaN(label)) {
+              // Korean numeric tickers: smart recognition
+              if (nm.includes('KODEX') && (nm.includes('NASDAQ') || nm.includes('나스닥'))) label = 'KODEX 나스닥';
+              else if (nm.includes('KODEX') && (nm.includes('S&P') || nm.includes('500'))) label = 'KODEX S&P';
+              else if (nm.includes('KODEX') && nm.includes('반도체')) label = 'KODEX 반도체';
+              else if (nm.includes('KODEX')) label = 'KODEX';
+              else if (nm.includes('TIGER')) label = 'TIGER';
+              else if (nm.includes('RISE') && (nm.includes('SEMI') || nm.includes('반도체'))) label = 'RISE 반도체';
+              else if (nm.includes('RISE')) label = 'RISE';
+              else if (nm.includes('ACE')) label = 'ACE';
+              else if (nm.includes('삼성전자')) label = '삼성전자';
+              else if (slice.item.name) label = slice.item.name.slice(0, 7);
+            } else {
+              // US tickers
+              if (label.length > 7) label = label.slice(0, 7);
             }
 
             ctx.save();
@@ -1007,13 +999,13 @@
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
 
-            if (slice.item.weightPercent >= 5.5 || isHovered) {
-              ctx.font = 'bold 11px monospace';
+            if (slice.item.weightPercent >= 5.0 || isHovered) {
+              ctx.font = 'bold 11.5px monospace';
               ctx.fillText(label, tx, ty - 6);
-              ctx.font = 'bold 10px sans-serif';
+              ctx.font = 'bold 10.5px sans-serif';
               ctx.fillText(`${slice.item.weightPercent.toFixed(1)}%`, tx, ty + 7);
             } else {
-              ctx.font = 'bold 9.5px sans-serif';
+              ctx.font = 'bold 10px sans-serif';
               ctx.fillText(`${slice.item.weightPercent.toFixed(1)}%`, tx, ty);
             }
             ctx.restore();
@@ -1028,10 +1020,10 @@
         if (activeIndex === -1) {
           centerOverlay.innerHTML = `
             <div style="font-size: 0.74rem; color: var(--text-muted); font-weight: 600;">총 자산 비중</div>
-            <div style="font-size: 1.18rem; font-weight: 800; font-family: var(--font-mono); color: var(--text-main); margin: 0.15rem 0;">
+            <div style="font-size: 1.25rem; font-weight: 800; font-family: var(--font-mono); color: var(--text-main); margin: 0.15rem 0;">
               ${holdings.length}개 자산
             </div>
-            <div style="font-size: 0.8rem; color: #38bdf8; font-family: var(--font-mono); font-weight: 700;">
+            <div style="font-size: 0.85rem; color: #38bdf8; font-family: var(--font-mono); font-weight: 700;">
               ${CalculatorService.formatCurrency(summary.totalMarketValueKRW || 0, 'KRW')}
             </div>
             <div style="font-size: 0.68rem; color: var(--text-dim); margin-top: 0.35rem;">터치/호버시 상세정보</div>
@@ -1041,13 +1033,13 @@
           const slice = slices[activeIndex];
           centerOverlay.innerHTML = `
             ${StockLogoService.renderAvatarHtml(h.ticker, h.name, h.market, slice.color, 'lg')}
-            <div style="font-size: 0.86rem; font-weight: 700; color: var(--text-main); max-width: 140px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 0.2rem;">
+            <div style="font-size: 0.88rem; font-weight: 700; color: var(--text-main); max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 0.2rem;" title="${h.name}">
               ${h.name}
             </div>
-            <div style="font-size: 0.72rem; color: var(--text-muted); font-family: var(--font-mono);">
-              ${h.ticker} · <strong style="color: ${slice.color};">${h.weightPercent.toFixed(1)}%</strong>
+            <div style="font-size: 0.74rem; color: var(--text-muted); font-family: var(--font-mono);">
+              ${h.ticker} · <strong style="color: ${slice.color}; font-size: 0.82rem;">${h.weightPercent.toFixed(1)}%</strong>
             </div>
-            <div style="font-size: 0.88rem; font-weight: 800; font-family: var(--font-mono); color: var(--text-main); margin-top: 0.15rem;">
+            <div style="font-size: 0.92rem; font-weight: 800; font-family: var(--font-mono); color: var(--text-main); margin-top: 0.15rem;">
               ${CalculatorService.formatCurrency(h.marketValueKRW, 'KRW')}
             </div>
           `;
@@ -1062,7 +1054,7 @@
         const dy = y - (size / 2);
         const dist = Math.sqrt(dx * dx + dy * dy);
 
-        if (dist < baseIr - 10 || dist > baseR + 18) return -1;
+        if (dist < baseIr - 10 || dist > baseR + 20) return -1;
 
         let angle = Math.atan2(dy, dx);
         if (angle < -Math.PI / 2) angle += Math.PI * 2;
@@ -1123,6 +1115,7 @@
       if (legendEl) {
         legendEl.innerHTML = holdings.map((h, idx) => {
           const color = colors[idx % colors.length];
+          const isCash = h.market === 'CASH';
           return `
             <div class="legend-grid-card" data-idx="${idx}">
               <div class="legend-card-left">
@@ -1130,14 +1123,16 @@
                 <div class="legend-card-info">
                   <div class="legend-card-name">
                     <span class="legend-dot" style="background-color: ${color};"></span>
-                    <strong>${h.name}</strong>
+                    <strong title="${h.name}">${h.name}</strong>
                   </div>
-                  <div class="legend-card-ticker">${h.ticker}</div>
+                  <div class="legend-card-ticker">${h.ticker} · <span style="color: ${color}; font-weight: 700;">${h.weightPercent.toFixed(1)}%</span></div>
                 </div>
               </div>
               <div class="legend-card-right">
                 <div class="legend-card-val">${CalculatorService.formatCurrency(h.marketValueKRW, 'KRW')}</div>
-                <div class="legend-card-pct" style="color: ${color};">${h.weightPercent.toFixed(1)}%</div>
+                ${!isCash ? `
+                  <div style="font-size: 0.72rem; font-weight: 600;" class="${h.profit >= 0 ? 'profit-text' : 'loss-text'}">${CalculatorService.formatPercent(h.returnRate)}</div>
+                ` : '<div style="font-size: 0.7rem; color: var(--text-dim);">원금보존</div>'}
               </div>
             </div>
           `;
