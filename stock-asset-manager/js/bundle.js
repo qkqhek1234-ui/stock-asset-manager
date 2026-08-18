@@ -907,9 +907,9 @@
         '#7c3aed', '#0ea5e9', '#10b981', '#f43f5e', '#eab308'
       ];
 
-      // Responsive size calculation & Retina high-DPI scaling
-      const wrapperWidth = wrapper ? wrapper.clientWidth : 400;
-      const size = Math.min(410, Math.max(300, wrapperWidth - 10));
+      // Responsive size calculation & Retina high-DPI scaling (Expanded up to 460px)
+      const wrapperWidth = wrapper ? wrapper.clientWidth : 460;
+      const size = Math.min(460, Math.max(320, wrapperWidth - 10));
       const dpr = window.devicePixelRatio || 1;
 
       canvas.width = size * dpr;
@@ -922,8 +922,8 @@
 
       const cx = size / 2;
       const cy = size / 2;
-      const baseR = (size / 2) - 14;
-      const baseIr = baseR * 0.56;
+      const baseR = (size / 2) - 16;
+      const baseIr = baseR * 0.54;
 
       let curAngle = -Math.PI / 2;
       const slices = holdings.map((item, idx) => {
@@ -949,7 +949,7 @@
           ctx.save();
           if (isHovered) {
             ctx.shadowColor = slice.color;
-            ctx.shadowBlur = 16;
+            ctx.shadowBlur = 18;
           }
           ctx.beginPath();
           ctx.arc(cx, cy, r, slice.startAngle, slice.endAngle);
@@ -963,8 +963,8 @@
           ctx.stroke();
           ctx.restore();
 
-          // In-slice smart text labeling
-          if (slice.item.weightPercent >= 3.0 || isHovered) {
+          // In-slice smart text labeling (visible down to 2.5%)
+          if (slice.item.weightPercent >= 2.5 || isHovered) {
             const midR = (r + ir) / 2;
             const tx = cx + Math.cos(slice.midAngle) * midR;
             const ty = cy + Math.sin(slice.midAngle) * midR;
@@ -985,8 +985,10 @@
               else if (nm.includes('ACE')) label = 'ACE';
               else if (nm.includes('삼성전자')) label = '삼성전자';
               else if (slice.item.name) label = slice.item.name.slice(0, 7);
+            } else if (nm.includes('ISHARES') || label.includes('ISHARES')) {
+              label = 'iShares';
             } else {
-              // US tickers
+              // US tickers (e.g. MSFT, DELL, LLY, AVGO, ASML, HWM, GE, MRVL, VEEV, MKSI, SCHD, SGOV)
               if (label.length > 7) label = label.slice(0, 7);
             }
 
@@ -999,14 +1001,22 @@
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
 
-            if (slice.item.weightPercent >= 5.0 || isHovered) {
-              ctx.font = 'bold 11.5px monospace';
-              ctx.fillText(label, tx, ty - 6);
-              ctx.font = 'bold 10.5px sans-serif';
+            if (slice.item.weightPercent >= 6.0 || isHovered) {
+              ctx.font = 'bold 12px monospace';
+              ctx.fillText(label, tx, ty - 7);
+              ctx.font = 'bold 11px sans-serif';
               ctx.fillText(`${slice.item.weightPercent.toFixed(1)}%`, tx, ty + 7);
+            } else if (slice.item.weightPercent >= 3.6) {
+              ctx.font = 'bold 10.5px monospace';
+              ctx.fillText(label, tx, ty - 6);
+              ctx.font = 'bold 9.5px sans-serif';
+              ctx.fillText(`${slice.item.weightPercent.toFixed(1)}%`, tx, ty + 6);
             } else {
-              ctx.font = 'bold 10px sans-serif';
-              ctx.fillText(`${slice.item.weightPercent.toFixed(1)}%`, tx, ty);
+              // 2.5% ~ 3.5%: Compact 2-line labeling
+              ctx.font = 'bold 9px monospace';
+              ctx.fillText(label, tx, ty - 5);
+              ctx.font = 'bold 8.5px sans-serif';
+              ctx.fillText(`${slice.item.weightPercent.toFixed(1)}%`, tx, ty + 6);
             }
             ctx.restore();
           }
@@ -1019,11 +1029,11 @@
         if (!centerOverlay) return;
         if (activeIndex === -1) {
           centerOverlay.innerHTML = `
-            <div style="font-size: 0.74rem; color: var(--text-muted); font-weight: 600;">총 자산 비중</div>
-            <div style="font-size: 1.25rem; font-weight: 800; font-family: var(--font-mono); color: var(--text-main); margin: 0.15rem 0;">
+            <div style="font-size: 0.76rem; color: var(--text-muted); font-weight: 600;">총 자산 비중</div>
+            <div style="font-size: 1.32rem; font-weight: 800; font-family: var(--font-mono); color: var(--text-main); margin: 0.15rem 0;">
               ${holdings.length}개 자산
             </div>
-            <div style="font-size: 0.85rem; color: #38bdf8; font-family: var(--font-mono); font-weight: 700;">
+            <div style="font-size: 0.88rem; color: #38bdf8; font-family: var(--font-mono); font-weight: 700;">
               ${CalculatorService.formatCurrency(summary.totalMarketValueKRW || 0, 'KRW')}
             </div>
             <div style="font-size: 0.68rem; color: var(--text-dim); margin-top: 0.35rem;">터치/호버시 상세정보</div>
@@ -1033,13 +1043,13 @@
           const slice = slices[activeIndex];
           centerOverlay.innerHTML = `
             ${StockLogoService.renderAvatarHtml(h.ticker, h.name, h.market, slice.color, 'lg')}
-            <div style="font-size: 0.88rem; font-weight: 700; color: var(--text-main); max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 0.2rem;" title="${h.name}">
+            <div style="font-size: 0.9rem; font-weight: 700; color: var(--text-main); max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 0.25rem;" title="${h.name}">
               ${h.name}
             </div>
-            <div style="font-size: 0.74rem; color: var(--text-muted); font-family: var(--font-mono);">
-              ${h.ticker} · <strong style="color: ${slice.color}; font-size: 0.82rem;">${h.weightPercent.toFixed(1)}%</strong>
+            <div style="font-size: 0.76rem; color: var(--text-muted); font-family: var(--font-mono);">
+              ${h.ticker} · <strong style="color: ${slice.color}; font-size: 0.85rem;">${h.weightPercent.toFixed(1)}%</strong>
             </div>
-            <div style="font-size: 0.92rem; font-weight: 800; font-family: var(--font-mono); color: var(--text-main); margin-top: 0.15rem;">
+            <div style="font-size: 0.95rem; font-weight: 800; font-family: var(--font-mono); color: var(--text-main); margin-top: 0.15rem;">
               ${CalculatorService.formatCurrency(h.marketValueKRW, 'KRW')}
             </div>
           `;
