@@ -195,6 +195,11 @@
   color: #fbbf24;
 }
 
+.badge-cash {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+}
+
 /* Buttons */
 .btn {
   display: inline-flex;

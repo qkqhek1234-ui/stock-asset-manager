@@ -20,13 +20,15 @@
         const ticker = (tx.ticker || '').trim().toUpperCase();
         if (!ticker) return;
 
-        const type = tx.type; // 'BUY', 'SELL', 'DIVIDEND'
+        const type = tx.type; // 'BUY', 'SELL', 'DEPOSIT', 'WITHDRAW', 'DIVIDEND'
         const qty = parseFloat(tx.quantity) || 0;
         const price = parseFloat(tx.price) || 0;
         const fee = parseFloat(tx.fee) || 0;
-        const currency = tx.currency || (tx.market === 'US' ? 'USD' : 'KRW');
+        const currency = tx.currency || (tx.market === 'US' || tx.market === 'CASH_USD' || ticker.includes('USD') ? 'USD' : 'KRW');
         const name = tx.name || ticker;
-        const market = tx.market || (currency === 'USD' ? 'US' : 'KR');
+        const market = (tx.market === 'CASH' || tx.market === 'CASH_KRW' || tx.market === 'CASH_USD' || ticker === 'KRW_CASH' || ticker === 'USD_CASH') 
+          ? 'CASH' 
+          : (tx.market || (currency === 'USD' ? 'US' : 'KR'));
 
         if (!holdingsMap[ticker]) {
           holdingsMap[ticker] = { ticker, name, market, currency, quantity: 0, totalInvested: 0, avgPrice: 0, totalDividends: 0 };
@@ -36,6 +38,20 @@
         item.name = name || item.name;
         item.market = market;
         item.currency = currency;
+
+        if (market === 'CASH') {
+          if (type === 'BUY' || type === 'DEPOSIT') {
+            item.quantity += qty;
+            item.totalInvested += qty;
+            item.avgPrice = 1;
+          } else if (type === 'SELL' || type === 'WITHDRAW') {
+            const actualQty = Math.min(qty, item.quantity);
+            item.quantity -= actualQty;
+            item.totalInvested -= actualQty;
+            item.avgPrice = 1;
+          }
+          return;
+        }
 
         if (type === 'BUY') {
           item.quantity += qty;
@@ -100,14 +116,15 @@
       Object.values(holdingsMap).forEach((item) => {
         if (item.quantity <= 0) return;
 
+        const isCash = item.market === 'CASH';
         const priceInfo = currentPrices[item.ticker] || {};
-        const currentPrice = priceInfo.price || item.avgPrice;
+        const currentPrice = isCash ? 1 : (priceInfo.price || item.avgPrice);
         const rate = item.currency === 'USD' ? exchangeRate : 1;
 
-        const marketValue = item.quantity * currentPrice;
-        const invested = item.totalInvested;
-        const profit = marketValue - invested;
-        const returnRate = invested > 0 ? (profit / invested) * 100 : 0;
+        const marketValue = isCash ? item.quantity : (item.quantity * currentPrice);
+        const invested = isCash ? item.quantity : item.totalInvested;
+        const profit = isCash ? 0 : (marketValue - invested);
+        const returnRate = isCash ? 0 : (invested > 0 ? (profit / invested) * 100 : 0);
 
         const marketValueKRW = marketValue * rate;
         const investedKRW = invested * rate;
@@ -115,7 +132,7 @@
 
         const marketValueUSD = exchangeRate > 0 ? (item.currency === 'USD' ? marketValue : marketValueKRW / exchangeRate) : 0;
         const investedUSD = exchangeRate > 0 ? (item.currency === 'USD' ? invested : investedKRW / exchangeRate) : 0;
-        const profitUSD = exchangeRate > 0 ? (item.currency === 'USD' ? profit : profitKRW / exchangeRate) : 0;
+        const profitUSD = isCash ? 0 : (exchangeRate > 0 ? (item.currency === 'USD' ? profit : profitKRW / exchangeRate) : 0);
 
         totalInvestedKRW += investedKRW;
         totalMarketValueKRW += marketValueKRW;
@@ -132,7 +149,7 @@
           marketValueUSD,
           investedUSD,
           profitUSD,
-          changePercent: priceInfo.changePercent || 0
+          changePercent: isCash ? 0 : (priceInfo.changePercent || 0)
         });
       });
 
@@ -346,7 +363,9 @@
       { symbol: '086520', name: '에코프로', market: 'KR', currency: 'KRW', nameKo: '에코프로' },
       { symbol: '196170', name: '알테오젠', market: 'KR', currency: 'KRW', nameKo: '알테오젠' },
       { symbol: '005490', name: 'POSCO홀딩스', market: 'KR', currency: 'KRW', nameKo: '포스코 POSCO' },
-      { symbol: '012330', name: '현대모비스', market: 'KR', currency: 'KRW', nameKo: '현대모비스' }
+      { symbol: '012330', name: '현대모비스', market: 'KR', currency: 'KRW', nameKo: '현대모비스' },
+      { symbol: 'KRW_CASH', name: '원화 현금 / 예수금', market: 'CASH', currency: 'KRW', nameKo: '원화 현금 예수금 cash krw' },
+      { symbol: 'USD_CASH', name: '달러 현금 / 외화예수금', market: 'CASH', currency: 'USD', nameKo: '달러 외화 예수금 cash usd' }
     ],
 
     async searchStocks(keyword) {
@@ -411,6 +430,10 @@
 
     async fetchQuote(ticker, market = 'US') {
       const clean = ticker.trim().toUpperCase();
+      if (market === 'CASH' || clean === 'KRW_CASH' || clean === 'USD_CASH' || clean === 'KRW' || clean === 'USD') {
+        const cur = (market === 'US' || clean === 'USD_CASH' || clean === 'USD') ? 'USD' : 'KRW';
+        return { ticker: clean, price: 1, changePercent: 0, currency: cur };
+      }
       try {
         const res = await fetch(`/api/quote?ticker=${encodeURIComponent(clean)}`);
         if (res.ok) {
@@ -833,9 +856,15 @@
 
     // --- VIEW 2: PORTFOLIO ---
     renderPortfolio(container, { holdings }) {
+      const totalCount = holdings.length;
+      const krCount = holdings.filter(h => h.market === 'KR').length;
+      const usCount = holdings.filter(h => h.market === 'US').length;
+      const cashCount = holdings.filter(h => h.market === 'CASH').length;
+
       let filtered = holdings.filter((h) => {
         if (this.portfolioFilter === 'KR') return h.market === 'KR';
         if (this.portfolioFilter === 'US') return h.market === 'US';
+        if (this.portfolioFilter === 'CASH') return h.market === 'CASH';
         return true;
       });
 
@@ -850,14 +879,15 @@
         <div style="display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.25rem;">
           <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
             <h2 style="font-size: 1.35rem; font-weight: 700; letter-spacing: -0.02em;">보유 종목 포트폴리오</h2>
-            <button id="btn-port-add" class="btn btn-primary btn-sm"><span>➕</span> 매수/매도 기록</button>
+            <button id="btn-port-add" class="btn btn-primary btn-sm"><span>➕</span> 매수/매도/현금 기록</button>
           </div>
 
           <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; background: var(--bg-card); padding: 0.6rem 0.85rem; border-radius: var(--radius-md); border: 1px solid var(--border-subtle);">
-            <div style="display: flex; gap: 0.35rem;">
-              <button class="btn btn-sm ${this.portfolioFilter === 'ALL' ? 'btn-primary' : 'btn-secondary'}" data-pfilter="ALL">전체 (${holdings.length})</button>
-              <button class="btn btn-sm ${this.portfolioFilter === 'KR' ? 'btn-primary' : 'btn-secondary'}" data-pfilter="KR">국내 (${holdings.filter(h => h.market === 'KR').length})</button>
-              <button class="btn btn-sm ${this.portfolioFilter === 'US' ? 'btn-primary' : 'btn-secondary'}" data-pfilter="US">미국 (${holdings.filter(h => h.market === 'US').length})</button>
+            <div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
+              <button class="btn btn-sm ${this.portfolioFilter === 'ALL' ? 'btn-primary' : 'btn-secondary'}" data-pfilter="ALL">전체 (${totalCount})</button>
+              <button class="btn btn-sm ${this.portfolioFilter === 'KR' ? 'btn-primary' : 'btn-secondary'}" data-pfilter="KR">국내 (${krCount})</button>
+              <button class="btn btn-sm ${this.portfolioFilter === 'US' ? 'btn-primary' : 'btn-secondary'}" data-pfilter="US">미국 (${usCount})</button>
+              <button class="btn btn-sm ${this.portfolioFilter === 'CASH' ? 'btn-primary' : 'btn-secondary'}" data-pfilter="CASH">현금 (${cashCount})</button>
             </div>
 
             <div style="display: flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; color: var(--text-muted);">
@@ -877,7 +907,7 @@
           <table class="stock-table">
             <thead>
               <tr>
-                <th>종목 / 티커</th>
+                <th>종목 / 자산</th>
                 <th class="text-right">보유수량</th>
                 <th class="text-right">평균단가</th>
                 <th class="text-right">현재가 (전일대비)</th>
@@ -888,43 +918,59 @@
               </tr>
             </thead>
             <tbody>
-              ${filtered.length === 0 ? '<tr><td colspan="8" style="text-align: center; padding: 2rem; color: var(--text-dim);">보유 중인 종목이 없습니다.</td></tr>' : ''}
+              ${filtered.length === 0 ? '<tr><td colspan="8" style="text-align: center; padding: 2rem; color: var(--text-dim);">보유 중인 자산이 없습니다.</td></tr>' : ''}
               ${filtered.map((h) => {
                 const isP = h.profit >= 0;
                 const change = parseFloat(h.changePercent) || 0;
                 const isDayP = change >= 0;
                 const daySign = change > 0 ? '+' : '';
+                const isCash = h.market === 'CASH';
+                const badgeClass = isCash ? 'badge-cash' : (h.market === 'US' ? 'badge-us' : 'badge-kr');
+                const badgeText = isCash ? '현금' : h.market;
+                const qtyText = isCash 
+                  ? (h.currency === 'USD' ? '$' + CalculatorService.formatNumber(h.quantity, 2) : CalculatorService.formatNumber(h.quantity, 0) + '원')
+                  : `${CalculatorService.formatNumber(h.quantity, h.market === 'US' ? 2 : 0)}주`;
+                const priceText = isCash 
+                  ? (h.currency === 'USD' ? '$1.00' : '₩1')
+                  : CalculatorService.formatCurrency(h.currentPrice, h.currency);
+
                 return `
                   <tr>
                     <td>
                       <div style="display: flex; align-items: center; gap: 0.4rem;">
-                        <span class="badge ${h.market === 'US' ? 'badge-us' : 'badge-kr'}">${h.market}</span>
+                        <span class="badge ${badgeClass}">${badgeText}</span>
                         <strong style="font-size: 0.93rem;">${h.name}</strong>
                       </div>
                       <div style="font-size: 0.75rem; color: var(--text-dim); font-family: var(--font-mono); margin-top: 0.15rem;">${h.ticker}</div>
                     </td>
-                    <td class="text-right" style="font-family: var(--font-mono); font-weight: 600; font-size: 0.9rem;">${CalculatorService.formatNumber(h.quantity, h.market === 'US' ? 2 : 0)}주</td>
-                    <td class="text-right" style="font-family: var(--font-mono); font-size: 0.88rem;">${CalculatorService.formatCurrency(h.avgPrice, h.currency)}</td>
+                    <td class="text-right" style="font-family: var(--font-mono); font-weight: 600; font-size: 0.9rem;">${qtyText}</td>
+                    <td class="text-right" style="font-family: var(--font-mono); font-size: 0.88rem;">${priceText}</td>
                     <td class="text-right" style="font-family: var(--font-mono);">
-                      <div style="font-weight: 600; font-size: 0.9rem;">${CalculatorService.formatCurrency(h.currentPrice, h.currency)}</div>
-                      <div style="font-size: 0.76rem; font-weight: 600;" class="${isDayP ? 'profit-text' : 'loss-text'}">
-                        ${daySign}${change.toFixed(2)}% ${isDayP ? '▲' : '▼'}
-                      </div>
+                      <div style="font-weight: 600; font-size: 0.9rem;">${priceText}</div>
+                      ${!isCash ? `
+                        <div style="font-size: 0.76rem; font-weight: 600;" class="${isDayP ? 'profit-text' : 'loss-text'}">
+                          ${daySign}${change.toFixed(2)}% ${isDayP ? '▲' : '▼'}
+                        </div>
+                      ` : '<div style="font-size: 0.74rem; color: var(--text-dim);">원금 보존</div>'}
                     </td>
                     <td class="text-right" style="font-family: var(--font-mono);">
                       <div style="font-weight: 700; font-size: 0.95rem; color: var(--text-main);">${CalculatorService.formatCurrency(h.marketValueKRW, 'KRW')}</div>
                       <div style="font-size: 0.76rem; color: #38bdf8; font-weight: 600; margin-top: 0.15rem;">${CalculatorService.formatCurrency(h.marketValueUSD, 'USD')}</div>
                     </td>
                     <td class="text-right" style="font-family: var(--font-mono);">
-                      <div class="${isP ? 'profit-text' : 'loss-text'}" style="font-weight: 700; font-size: 0.92rem;">${isP ? '+' : ''}${CalculatorService.formatCurrency(h.profitKRW, 'KRW')}</div>
-                      <div style="display: flex; justify-content: flex-end; align-items: center; gap: 0.35rem; margin-top: 0.2rem;">
-                        <span class="${isP ? 'profit-text' : 'loss-text'}" style="font-size: 0.76rem; opacity: 0.9; font-weight: 600;">
-                          ${isP ? '+' : ''}${CalculatorService.formatCurrency(h.profitUSD, 'USD')}
-                        </span>
-                        <span class="${isP ? 'profit-badge' : 'loss-badge'}" style="font-size: 0.72rem; padding: 0.08rem 0.38rem; font-weight: 700;">
-                          ${CalculatorService.formatPercent(h.returnRate)}
-                        </span>
-                      </div>
+                      ${isCash ? `
+                        <div style="color: var(--text-muted); font-size: 0.85rem;">-</div>
+                      ` : `
+                        <div class="${isP ? 'profit-text' : 'loss-text'}" style="font-weight: 700; font-size: 0.92rem;">${isP ? '+' : ''}${CalculatorService.formatCurrency(h.profitKRW, 'KRW')}</div>
+                        <div style="display: flex; justify-content: flex-end; align-items: center; gap: 0.35rem; margin-top: 0.2rem;">
+                          <span class="${isP ? 'profit-text' : 'loss-text'}" style="font-size: 0.76rem; opacity: 0.9; font-weight: 600;">
+                            ${isP ? '+' : ''}${CalculatorService.formatCurrency(h.profitUSD, 'USD')}
+                          </span>
+                          <span class="${isP ? 'profit-badge' : 'loss-badge'}" style="font-size: 0.72rem; padding: 0.08rem 0.38rem; font-weight: 700;">
+                            ${CalculatorService.formatPercent(h.returnRate)}
+                          </span>
+                        </div>
+                      `}
                     </td>
                     <td class="text-right" style="font-family: var(--font-mono); font-weight: 600; font-size: 0.9rem;">${h.weightPercent.toFixed(1)}%</td>
                     <td class="text-right">
@@ -932,7 +978,7 @@
                         <button class="btn btn-sm btn-sell-stock" 
                           style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); font-weight: 600;"
                           data-ticker="${h.ticker}" data-price="${h.currentPrice}" data-name="${h.name}" data-qty="${h.quantity}" data-avg="${h.avgPrice}" data-currency="${h.currency}" data-market="${h.market}">
-                          📉 매도
+                          ${isCash ? '💸 출금' : '📉 매도'}
                         </button>
                         <button class="btn btn-secondary btn-sm btn-edit-stock" 
                           data-ticker="${h.ticker}" data-price="${h.currentPrice}" data-name="${h.name}" data-qty="${h.quantity}" data-avg="${h.avgPrice}" data-currency="${h.currency}" data-market="${h.market}">
@@ -952,18 +998,28 @@
 
         <!-- Mobile Cards View (스마트폰 / Galaxy S26 Ultra 등) -->
         <div class="mobile-only-cards mobile-stock-list" style="display: none; flex-direction: column; gap: 0.65rem;">
-          ${filtered.length === 0 ? '<div class="card" style="text-align: center; padding: 2rem; color: var(--text-dim);">보유 중인 종목이 없습니다.</div>' : ''}
+          ${filtered.length === 0 ? '<div class="card" style="text-align: center; padding: 2rem; color: var(--text-dim);">보유 중인 자산이 없습니다.</div>' : ''}
           ${filtered.map((h) => {
             const isP = h.profit >= 0;
             const change = parseFloat(h.changePercent) || 0;
             const isDayP = change >= 0;
             const daySign = change > 0 ? '+' : '';
+            const isCash = h.market === 'CASH';
+            const badgeClass = isCash ? 'badge-cash' : (h.market === 'US' ? 'badge-us' : 'badge-kr');
+            const badgeText = isCash ? '현금' : h.market;
+            const qtyText = isCash 
+              ? (h.currency === 'USD' ? '$' + CalculatorService.formatNumber(h.quantity, 2) : CalculatorService.formatNumber(h.quantity, 0) + '원')
+              : `${CalculatorService.formatNumber(h.quantity, h.market === 'US' ? 2 : 0)}주`;
+            const priceText = isCash 
+              ? (h.currency === 'USD' ? '$1.00' : '₩1')
+              : CalculatorService.formatCurrency(h.currentPrice, h.currency);
+
             return `
               <div class="card mobile-stock-card" style="padding: 0.95rem 1rem;">
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.65rem;">
                   <div>
                     <div style="display: flex; align-items: center; gap: 0.35rem;">
-                      <span class="badge ${h.market === 'US' ? 'badge-us' : 'badge-kr'}">${h.market}</span>
+                      <span class="badge ${badgeClass}">${badgeText}</span>
                       <strong style="font-size: 1rem; letter-spacing: -0.01em;">${h.name}</strong>
                     </div>
                     <div style="font-size: 0.75rem; color: var(--text-dim); font-family: var(--font-mono); margin-top: 0.15rem;">
@@ -971,19 +1027,21 @@
                     </div>
                   </div>
                   <div style="text-align: right;">
-                    <div style="font-weight: 700; font-size: 1.08rem; font-family: var(--font-mono);">${CalculatorService.formatCurrency(h.currentPrice, h.currency)}</div>
-                    <div style="font-size: 0.78rem; font-weight: 600;" class="${isDayP ? 'profit-text' : 'loss-text'}">
-                      ${daySign}${change.toFixed(2)}% ${isDayP ? '▲' : '▼'}
-                    </div>
+                    <div style="font-weight: 700; font-size: 1.08rem; font-family: var(--font-mono);">${priceText}</div>
+                    ${!isCash ? `
+                      <div style="font-size: 0.78rem; font-weight: 600;" class="${isDayP ? 'profit-text' : 'loss-text'}">
+                        ${daySign}${change.toFixed(2)}% ${isDayP ? '▲' : '▼'}
+                      </div>
+                    ` : '<div style="font-size: 0.74rem; color: var(--text-dim);">원금 보존</div>'}
                   </div>
                 </div>
 
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 0.6rem; background: var(--bg-secondary); padding: 0.7rem 0.85rem; border-radius: var(--radius-sm); font-size: 0.82rem; margin-bottom: 0.75rem;">
                   <!-- 1. 보유수량 & 평단가 -->
                   <div>
-                    <div style="color: var(--text-muted); font-size: 0.72rem;">보유수량 · 평단가</div>
+                    <div style="color: var(--text-muted); font-size: 0.72rem;">보유 금액 / 수량</div>
                     <div style="font-weight: 600; font-family: var(--font-mono); font-size: 0.84rem; margin-top: 0.1rem;">
-                      ${CalculatorService.formatNumber(h.quantity, h.market === 'US' ? 2 : 0)}주 @ ${CalculatorService.formatCurrency(h.avgPrice, h.currency)}
+                      ${qtyText}
                     </div>
                   </div>
 
@@ -1001,19 +1059,23 @@
                   <!-- 3. 평가손익 (KRW / USD) -->
                   <div>
                     <div style="color: var(--text-muted); font-size: 0.72rem;">평가손익 (원화 / 달러)</div>
-                    <div class="${isP ? 'profit-text' : 'loss-text'}" style="font-weight: 700; font-family: var(--font-mono); font-size: 0.88rem;">
-                      ${isP ? '+' : ''}${CalculatorService.formatCurrency(h.profitKRW, 'KRW')}
-                    </div>
-                    <div class="${isP ? 'profit-text' : 'loss-text'}" style="font-size: 0.74rem; font-family: var(--font-mono); opacity: 0.9;">
-                      ${isP ? '+' : ''}${CalculatorService.formatCurrency(h.profitUSD, 'USD')}
-                    </div>
+                    ${isCash ? `
+                      <div style="color: var(--text-muted); font-size: 0.84rem; font-weight: 600;">-</div>
+                    ` : `
+                      <div class="${isP ? 'profit-text' : 'loss-text'}" style="font-weight: 700; font-family: var(--font-mono); font-size: 0.88rem;">
+                        ${isP ? '+' : ''}${CalculatorService.formatCurrency(h.profitKRW, 'KRW')}
+                      </div>
+                      <div class="${isP ? 'profit-text' : 'loss-text'}" style="font-size: 0.74rem; font-family: var(--font-mono); opacity: 0.9;">
+                        ${isP ? '+' : ''}${CalculatorService.formatCurrency(h.profitUSD, 'USD')}
+                      </div>
+                    `}
                   </div>
 
                   <!-- 4. 수익률 -->
                   <div style="text-align: right; display: flex; flex-direction: column; justify-content: center; align-items: flex-end;">
                     <div style="color: var(--text-muted); font-size: 0.72rem; margin-bottom: 0.15rem;">수익률</div>
                     <span class="${isP ? 'profit-badge' : 'loss-badge'}" style="font-size: 0.8rem; padding: 0.12rem 0.5rem; font-weight: 700; font-family: var(--font-mono);">
-                      ${CalculatorService.formatPercent(h.returnRate)}
+                      ${isCash ? '0.00%' : CalculatorService.formatPercent(h.returnRate)}
                     </span>
                   </div>
                 </div>
@@ -1022,7 +1084,7 @@
                   <button class="btn btn-sm btn-sell-stock" 
                     style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); font-weight: 700; padding: 0.45rem 0.4rem; font-size: 0.8rem;"
                     data-ticker="${h.ticker}" data-price="${h.currentPrice}" data-name="${h.name}" data-qty="${h.quantity}" data-avg="${h.avgPrice}" data-currency="${h.currency}" data-market="${h.market}">
-                    📉 매도
+                    ${isCash ? '💸 출금' : '📉 매도'}
                   </button>
                   <button class="btn btn-secondary btn-sm btn-edit-stock" 
                     style="padding: 0.45rem 0.4rem; font-size: 0.8rem;"
@@ -1239,10 +1301,18 @@
         <div style="display: flex; flex-direction: column; gap: 0.55rem;">
           ${list.length === 0 ? '<div class="card" style="text-align: center; color: var(--text-dim); padding: 2.5rem;">해당 조건의 거래 내역이 없습니다.</div>' : ''}
           ${list.map((tx) => {
-            let badge = tx.type === 'BUY' 
-              ? '<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; padding: 0.18rem 0.45rem; font-size: 0.75rem; white-space: nowrap; flex-shrink: 0; min-width: 36px; text-align: center; display: inline-flex; justify-content: center;">매수</span>'
-              : '<span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #f87171; padding: 0.18rem 0.45rem; font-size: 0.75rem; white-space: nowrap; flex-shrink: 0; min-width: 36px; text-align: center; display: inline-flex; justify-content: center;">매도</span>';
-            const tot = (tx.quantity * tx.price) + (tx.type === 'BUY' ? (tx.fee || 0) : -(tx.fee || 0));
+            const isCash = tx.market === 'CASH' || tx.ticker === 'KRW_CASH' || tx.ticker === 'USD_CASH';
+            let badge = '';
+            if (isCash) {
+              badge = (tx.type === 'BUY' || tx.type === 'DEPOSIT')
+                ? '<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; padding: 0.18rem 0.45rem; font-size: 0.75rem; white-space: nowrap; flex-shrink: 0; min-width: 36px; text-align: center; display: inline-flex; justify-content: center;">입금</span>'
+                : '<span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #f87171; padding: 0.18rem 0.45rem; font-size: 0.75rem; white-space: nowrap; flex-shrink: 0; min-width: 36px; text-align: center; display: inline-flex; justify-content: center;">출금</span>';
+            } else {
+              badge = tx.type === 'BUY' 
+                ? '<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; padding: 0.18rem 0.45rem; font-size: 0.75rem; white-space: nowrap; flex-shrink: 0; min-width: 36px; text-align: center; display: inline-flex; justify-content: center;">매수</span>'
+                : '<span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #f87171; padding: 0.18rem 0.45rem; font-size: 0.75rem; white-space: nowrap; flex-shrink: 0; min-width: 36px; text-align: center; display: inline-flex; justify-content: center;">매도</span>';
+            }
+            const tot = isCash ? tx.quantity : ((tx.quantity * tx.price) + (tx.type === 'BUY' ? (tx.fee || 0) : -(tx.fee || 0)));
 
             return `
               <div class="card" style="padding: 0.75rem 0.85rem; display: flex; flex-direction: column; gap: 0.4rem;">
@@ -1256,7 +1326,7 @@
 
                   <div style="display: flex; align-items: center; gap: 0.45rem; flex-shrink: 0;">
                     <span style="font-size: 0.92rem; font-weight: 700; font-family: var(--font-mono); color: ${tx.type === 'BUY' ? '#60a5fa' : '#f87171'};">
-                      ${tx.type === 'BUY' ? '-' : '+'}${CalculatorService.formatCurrency(tot, tx.currency)}
+                      ${tx.type === 'BUY' ? (isCash ? '+' : '-') : (isCash ? '-' : '+')}${CalculatorService.formatCurrency(tot, tx.currency)}
                     </span>
                     <button class="btn-icon btn-del-tx" data-id="${tx.id}" title="삭제" style="padding: 0.25rem 0.4rem; font-size: 0.75rem; border-radius: var(--radius-sm); color: var(--text-dim);">🗑️</button>
                   </div>
@@ -1267,8 +1337,12 @@
                   <div>
                     <span>📅 ${tx.date}</span>
                     <span style="margin: 0 0.25rem; color: var(--border-active);">·</span>
-                    <span style="font-family: var(--font-mono);">${CalculatorService.formatNumber(tx.quantity, tx.currency === 'USD' ? 2 : 0)}주 @ ${CalculatorService.formatCurrency(tx.price, tx.currency)}</span>
-                    ${tx.fee ? `<span style="color: var(--text-dim); margin-left: 0.25rem;">(수수료 ${CalculatorService.formatCurrency(tx.fee, tx.currency)})</span>` : ''}
+                    ${isCash ? `
+                      <span style="font-family: var(--font-mono); color: #34d399; font-weight: 600;">${tx.type === 'BUY' ? '입금' : '출금'} ${CalculatorService.formatCurrency(tx.quantity, tx.currency)}</span>
+                    ` : `
+                      <span style="font-family: var(--font-mono);">${CalculatorService.formatNumber(tx.quantity, tx.currency === 'USD' ? 2 : 0)}주 @ ${CalculatorService.formatCurrency(tx.price, tx.currency)}</span>
+                      ${tx.fee ? `<span style="color: var(--text-dim); margin-left: 0.25rem;">(수수료 ${CalculatorService.formatCurrency(tx.fee, tx.currency)})</span>` : ''}
+                    `}
                   </div>
                   ${tx.memo ? `<div style="color: var(--text-dim); font-size: 0.72rem; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">💬 ${tx.memo}</div>` : ''}
                 </div>
@@ -1733,39 +1807,45 @@
     openAddModal() {
       const modal = document.getElementById('app-modal');
       const body = document.getElementById('modal-body');
-      document.getElementById('modal-title').textContent = '➕ 매수 / 매도 기록 추가';
+      document.getElementById('modal-title').textContent = '➕ 매수 / 매도 / 현금 기록 추가';
 
       body.innerHTML = `
         <form id="form-add-tx">
           <div class="form-group">
-            <label class="form-label">거래 유형</label>
+            <label class="form-label">자산 분류 / 시장</label>
+            <select id="add-market" class="form-select" required>
+              <option value="US">🇺🇸 미국 주식 (USD 달러)</option>
+              <option value="KR">🇰🇷 국내 주식 (KRW 원화)</option>
+              <option value="CASH_KRW">💵 원화 현금 / 예수금 (KRW)</option>
+              <option value="CASH_USD">💲 달러 현금 / 외화예수금 (USD)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" id="label-add-type">거래 유형</label>
             <select id="add-type" class="form-select" required>
               <option value="BUY">매수 (Buy)</option>
               <option value="SELL">매도 (Sell)</option>
             </select>
           </div>
-          <div class="form-group">
-            <label class="form-label">시장 / 국가</label>
-            <select id="add-market" class="form-select" required>
-              <option value="US">미국 주식 (USD 달러)</option>
-              <option value="KR">국내 주식 (KRW 원화)</option>
-            </select>
-          </div>
-          <div class="form-group autocomplete-wrapper">
+
+          <div id="group-add-ticker" class="form-group autocomplete-wrapper">
             <label class="form-label">종목코드 / 티커 (또는 종목명 검색)</label>
             <input type="text" id="add-ticker" class="form-input" placeholder="예: NVDA, AAPL, 삼성전자, 005930 입력..." autocomplete="off" required>
             <div id="ticker-autocomplete-dropdown" class="autocomplete-dropdown"></div>
           </div>
-          <div class="form-group">
-            <label class="form-label">종목명 (선택)</label>
+
+          <div id="group-add-name" class="form-group">
+            <label class="form-label">종목명 / 자산명</label>
             <input type="text" id="add-name" class="form-input" placeholder="예: 삼성전자 또는 Apple">
           </div>
+
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
             <div class="form-group">
-              <label class="form-label">수량 (주)</label>
+              <label class="form-label" id="label-add-qty">수량 (주)</label>
               <input type="number" id="add-qty" class="form-input" step="any" placeholder="0" required>
             </div>
-            <div class="form-group">
+            <div id="group-add-price" class="form-group">
               <label class="form-label" id="label-add-price">매수 단가</label>
               <input type="number" id="add-price" class="form-input" step="any" placeholder="0" required>
             </div>
@@ -1784,18 +1864,18 @@
           </div>
 
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
-            <div class="form-group">
+            <div id="group-add-fee" class="form-group">
               <label class="form-label">수수료 / 세금</label>
               <input type="number" id="add-fee" class="form-input" step="any" value="0">
             </div>
             <div class="form-group">
-              <label class="form-label">거래일자</label>
+              <label class="form-label">거래 / 입출금 일자</label>
               <input type="date" id="add-date" class="form-input" value="${new Date().toISOString().slice(0, 10)}" required>
             </div>
           </div>
           <div class="form-group">
             <label class="form-label">메모 (선택)</label>
-            <input type="text" id="add-memo" class="form-input" placeholder="매매 사유 등">
+            <input type="text" id="add-memo" class="form-input" placeholder="메모 (예: 월급 입금, 배당금 예수금, 매매 사유 등)">
           </div>
           <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 0.75rem;">기록 저장</button>
         </form>
@@ -1811,10 +1891,60 @@
       const buyPriceGroup = form.querySelector('#add-buy-price-group');
       const buyPriceInput = form.querySelector('#add-buy-price');
       const labelPrice = form.querySelector('#label-add-price');
+      const labelQty = form.querySelector('#label-add-qty');
+      const groupTicker = form.querySelector('#group-add-ticker');
+      const groupPrice = form.querySelector('#group-add-price');
+      const groupFee = form.querySelector('#group-add-fee');
       const dropdown = form.querySelector('#ticker-autocomplete-dropdown');
+
+      // Toggle UI based on Market selection (Stocks vs Cash)
+      const updateMarketUI = () => {
+        const mkt = marketSelect.value;
+        const isCash = mkt === 'CASH_KRW' || mkt === 'CASH_USD';
+        if (isCash) {
+          groupTicker.style.display = 'none';
+          groupPrice.style.display = 'none';
+          groupFee.style.display = 'none';
+          buyPriceGroup.style.display = 'none';
+          priceInput.value = '1';
+
+          if (mkt === 'CASH_KRW') {
+            tickerInput.value = 'KRW_CASH';
+            nameInput.value = '원화 현금 / 예수금';
+            labelQty.textContent = '입출금 금액 (원 ₩)';
+          } else {
+            tickerInput.value = 'USD_CASH';
+            nameInput.value = '달러 현금 / 외화예수금';
+            labelQty.textContent = '입출금 금액 (달러 $)';
+          }
+
+          typeSelect.innerHTML = `
+            <option value="BUY">💵 입금 / 잔고 추가 (Deposit)</option>
+            <option value="SELL">💸 출금 / 잔고 차감 (Withdraw)</option>
+          `;
+        } else {
+          groupTicker.style.display = 'block';
+          groupPrice.style.display = 'block';
+          groupFee.style.display = 'block';
+          labelQty.textContent = '수량 (주)';
+          tickerInput.value = '';
+          nameInput.value = '';
+          priceInput.value = '';
+
+          typeSelect.innerHTML = `
+            <option value="BUY">매수 (Buy)</option>
+            <option value="SELL">매도 (Sell)</option>
+          `;
+          updateTypeUI();
+        }
+      };
 
       // Toggle UI for Buy vs Sell
       const updateTypeUI = () => {
+        const mkt = marketSelect.value;
+        const isCash = mkt === 'CASH_KRW' || mkt === 'CASH_USD';
+        if (isCash) return;
+
         const isSell = typeSelect.value === 'SELL';
         if (isSell) {
           labelPrice.textContent = '매도 단가 (판매 가격)';
@@ -1824,8 +1954,10 @@
           buyPriceGroup.style.display = 'none';
         }
       };
+
+      marketSelect.addEventListener('change', updateMarketUI);
       typeSelect.addEventListener('change', updateTypeUI);
-      updateTypeUI();
+      updateMarketUI();
 
       // Autocomplete Search Wiring
       let debounceTimer = null;
@@ -1850,7 +1982,7 @@
             <div class="autocomplete-item" data-symbol="${item.symbol}" data-name="${item.name}" data-market="${item.market}" data-currency="${item.currency}">
               <div class="autocomplete-item-left">
                 <div class="autocomplete-ticker-line">
-                  <span class="badge ${item.market === 'US' ? 'badge-us' : 'badge-kr'}">${item.market}</span>
+                  <span class="badge ${item.market === 'CASH' ? 'badge-cash' : (item.market === 'US' ? 'badge-us' : 'badge-kr')}">${item.market === 'CASH' ? '현금' : item.market}</span>
                   <span class="autocomplete-ticker">${item.symbol}</span>
                 </div>
                 <div class="autocomplete-name">${item.name}</div>
@@ -1868,6 +2000,13 @@
               const sym = row.dataset.symbol;
               const nm = row.dataset.name;
               const mkt = row.dataset.market;
+
+              if (mkt === 'CASH') {
+                marketSelect.value = sym.includes('USD') ? 'CASH_USD' : 'CASH_KRW';
+                updateMarketUI();
+                dropdown.classList.remove('active');
+                return;
+              }
 
               tickerInput.value = sym;
               nameInput.value = nm;
@@ -1911,14 +2050,18 @@
         const ticker = form.querySelector('#add-ticker').value.trim().toUpperCase();
         const buyPriceVal = parseFloat(form.querySelector('#add-buy-price')?.value);
 
+        const isCash = market === 'CASH_KRW' || market === 'CASH_USD';
+        const currency = (market === 'US' || market === 'CASH_USD') ? 'USD' : 'KRW';
+        const cleanMarket = isCash ? 'CASH' : market;
+
         const newTx = StorageService.addTransaction({
           type,
-          market,
-          currency: market === 'US' ? 'USD' : 'KRW',
-          ticker,
-          name: form.querySelector('#add-name').value.trim() || ticker,
+          market: cleanMarket,
+          currency,
+          ticker: isCash ? (market === 'CASH_USD' ? 'USD_CASH' : 'KRW_CASH') : ticker,
+          name: form.querySelector('#add-name').value.trim() || (isCash ? (currency === 'USD' ? '달러 현금 / 외화예수금' : '원화 현금 / 예수금') : ticker),
           quantity: parseFloat(form.querySelector('#add-qty').value) || 0,
-          price: parseFloat(form.querySelector('#add-price').value) || 0,
+          price: isCash ? 1 : (parseFloat(form.querySelector('#add-price').value) || 0),
           buyPrice: type === 'SELL' && !isNaN(buyPriceVal) && buyPriceVal > 0 ? buyPriceVal : null,
           fee: parseFloat(form.querySelector('#add-fee').value) || 0,
           date: form.querySelector('#add-date').value,
@@ -1936,11 +2079,15 @@
     openSellStockModal(stock) {
       const modal = document.getElementById('app-modal');
       const body = document.getElementById('modal-body');
-      document.getElementById('modal-title').textContent = `📉 [${stock.name || stock.ticker}] 주식 매도`;
+      const isCash = stock.market === 'CASH';
+
+      document.getElementById('modal-title').textContent = isCash 
+        ? `💸 [${stock.name || stock.ticker}] 현금 출금`
+        : `📉 [${stock.name || stock.ticker}] 주식 매도`;
 
       const maxQty = parseFloat(stock.quantity) || 0;
-      const avgPrice = parseFloat(stock.avgPrice) || 0;
-      const curPrice = parseFloat(stock.price) || avgPrice;
+      const avgPrice = isCash ? 1 : (parseFloat(stock.avgPrice) || 0);
+      const curPrice = isCash ? 1 : (parseFloat(stock.price) || avgPrice);
 
       body.innerHTML = `
         <form id="form-sell-stock">
@@ -1948,58 +2095,60 @@
           <div style="background: var(--bg-secondary); padding: 0.85rem 1rem; border-radius: var(--radius-md); border: 1px solid var(--border-subtle); margin-bottom: 1.15rem; display: flex; justify-content: space-between; align-items: center;">
             <div>
               <div style="display: flex; align-items: center; gap: 0.4rem;">
-                <span class="badge ${stock.market === 'US' ? 'badge-us' : 'badge-kr'}">${stock.market}</span>
+                <span class="badge ${isCash ? 'badge-cash' : (stock.market === 'US' ? 'badge-us' : 'badge-kr')}">${isCash ? '현금' : stock.market}</span>
                 <strong style="font-size: 1.05rem;">${stock.name}</strong>
               </div>
               <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.2rem; font-family: var(--font-mono);">
-                ${stock.ticker} · 평단가: ${CalculatorService.formatCurrency(avgPrice, stock.currency)}
+                ${stock.ticker} · ${isCash ? '현금 자산' : `평단가: ${CalculatorService.formatCurrency(avgPrice, stock.currency)}`}
               </div>
             </div>
             <div style="text-align: right;">
-              <div style="font-size: 0.78rem; color: var(--text-muted);">보유 수량</div>
-              <div style="font-size: 1.1rem; font-weight: 700; font-family: var(--font-mono); color: var(--color-accent);">${CalculatorService.formatNumber(maxQty, stock.market === 'US' ? 2 : 0)}주</div>
+              <div style="font-size: 0.78rem; color: var(--text-muted);">${isCash ? '현재 잔고' : '보유 수량'}</div>
+              <div style="font-size: 1.1rem; font-weight: 700; font-family: var(--font-mono); color: var(--color-accent);">
+                ${isCash ? (stock.currency === 'USD' ? '$' + CalculatorService.formatNumber(maxQty, 2) : CalculatorService.formatNumber(maxQty, 0) + '원') : CalculatorService.formatNumber(maxQty, stock.market === 'US' ? 2 : 0) + '주'}
+              </div>
             </div>
           </div>
 
           <!-- Sell Quantity Input & Quick Ratio Buttons -->
           <div class="form-group">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
-              <label class="form-label" style="margin-bottom: 0;">매도 수량 (주)</label>
+              <label class="form-label" style="margin-bottom: 0;">${isCash ? '출금 금액' : '매도 수량 (주)'}</label>
               <div style="display: flex; gap: 0.3rem;">
                 <button type="button" class="btn btn-secondary btn-sm btn-quick-qty" data-ratio="0.25" style="padding: 0.15rem 0.45rem; font-size: 0.72rem;">25%</button>
                 <button type="button" class="btn btn-secondary btn-sm btn-quick-qty" data-ratio="0.5" style="padding: 0.15rem 0.45rem; font-size: 0.72rem;">50%</button>
                 <button type="button" class="btn btn-secondary btn-sm btn-quick-qty" data-ratio="0.75" style="padding: 0.15rem 0.45rem; font-size: 0.72rem;">75%</button>
-                <button type="button" class="btn btn-secondary btn-sm btn-quick-qty" data-ratio="1.0" style="padding: 0.15rem 0.45rem; font-size: 0.72rem; font-weight: 700; color: #f87171;">전량(100%)</button>
+                <button type="button" class="btn btn-secondary btn-sm btn-quick-qty" data-ratio="1.0" style="padding: 0.15rem 0.45rem; font-size: 0.72rem; font-weight: 700; color: #f87171;">전액(100%)</button>
               </div>
             </div>
             <input type="number" id="sell-qty" class="form-input" value="${maxQty}" step="any" min="0.0001" max="${maxQty}" required>
           </div>
 
           <!-- Sell Price Input -->
-          <div class="form-group">
+          <div class="form-group" style="${isCash ? 'display: none;' : ''}">
             <label class="form-label">매도 단가 (${stock.currency})</label>
             <input type="number" id="sell-price" class="form-input" value="${curPrice}" step="any" min="0" required>
           </div>
 
           <!-- Fee & Date Inputs -->
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
-            <div class="form-group">
+          <div style="display: grid; grid-template-columns: ${isCash ? '1fr' : '1fr 1fr'}; gap: 0.75rem;">
+            <div class="form-group" style="${isCash ? 'display: none;' : ''}">
               <label class="form-label">매도 수수료 / 제세금</label>
               <input type="number" id="sell-fee" class="form-input" value="0" step="any" min="0">
             </div>
             <div class="form-group">
-              <label class="form-label">매도 일자</label>
+              <label class="form-label">${isCash ? '출금 일자' : '매도 일자'}</label>
               <input type="date" id="sell-date" class="form-input" value="${new Date().toISOString().slice(0, 10)}" required>
             </div>
           </div>
 
           <div class="form-group">
             <label class="form-label">메모 (선택)</label>
-            <input type="text" id="sell-memo" class="form-input" placeholder="매도 사유 (예: 익절, 손절, 리밸런싱 등)">
+            <input type="text" id="sell-memo" class="form-input" placeholder="${isCash ? '출금 사유 (예: 주식 매수 대금 이체, 생활비 등)' : '매도 사유 (예: 익절, 손절, 리밸런싱 등)'}">
           </div>
 
           <!-- Live Preview Card -->
-          <div style="background: rgba(30, 41, 59, 0.6); padding: 0.85rem 1rem; border-radius: var(--radius-md); border: 1px dashed var(--border-subtle); margin: 1rem 0;">
+          <div style="background: rgba(30, 41, 59, 0.6); padding: 0.85rem 1rem; border-radius: var(--radius-md); border: 1px dashed var(--border-subtle); margin: 1rem 0; ${isCash ? 'display: none;' : ''}">
             <div style="display: flex; justify-content: space-between; font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.35rem;">
               <span>총 매도 수령액 (예상):</span>
               <strong id="preview-total-proceeds" style="color: var(--text-main); font-family: var(--font-mono); font-size: 0.9rem;">0</strong>
@@ -2011,7 +2160,7 @@
           </div>
 
           <button type="submit" class="btn btn-primary" style="width: 100%; background: #ef4444; border-color: #ef4444; font-weight: 700; padding: 0.65rem;">
-            📉 매도 확정 (포트폴리오 차감 & 매매일지 등록)
+            ${isCash ? '💸 출금 확정 (현금 잔고 차감)' : '📉 매도 확정 (포트폴리오 차감 & 매매일지 등록)'}
           </button>
         </form>
       `;
@@ -2023,6 +2172,7 @@
       const feeInput = form.querySelector('#sell-fee');
 
       const updatePreview = () => {
+        if (isCash) return;
         const q = parseFloat(qtyInput.value) || 0;
         const p = parseFloat(priceInput.value) || 0;
         const f = parseFloat(feeInput.value) || 0;
@@ -2047,7 +2197,7 @@
       form.querySelectorAll('.btn-quick-qty').forEach((btn) => {
         btn.addEventListener('click', () => {
           const ratio = parseFloat(btn.dataset.ratio);
-          const calculated = stock.market === 'US' ? Math.round(maxQty * ratio * 100) / 100 : Math.floor(maxQty * ratio);
+          const calculated = (stock.market === 'US' || (isCash && stock.currency === 'USD')) ? Math.round(maxQty * ratio * 100) / 100 : Math.floor(maxQty * ratio);
           qtyInput.value = calculated;
           updatePreview();
         });
@@ -2056,24 +2206,24 @@
       form.addEventListener('submit', (e) => {
         e.preventDefault();
         const sellQty = parseFloat(qtyInput.value);
-        const sellPrice = parseFloat(priceInput.value);
-        const fee = parseFloat(feeInput.value) || 0;
+        const sellPrice = isCash ? 1 : parseFloat(priceInput.value);
+        const fee = isCash ? 0 : (parseFloat(feeInput.value) || 0);
         const date = form.querySelector('#sell-date').value;
         const memo = form.querySelector('#sell-memo').value.trim();
 
         if (isNaN(sellQty) || sellQty <= 0) {
-          alert('올바른 매도 수량을 입력해주세요.');
+          alert(`올바른 ${isCash ? '출금 금액' : '매도 수량'}을 입력해주세요.`);
           return;
         }
 
         if (sellQty > maxQty) {
-          alert(`보유 수량(${maxQty}주)을 초과하여 매도할 수 없습니다.`);
+          alert(`현재 잔고(${maxQty})를 초과하여 출금/매도할 수 없습니다.`);
           return;
         }
 
-        // Add SELL transaction
+        // Add SELL/WITHDRAW transaction
         StorageService.addTransaction({
-          type: 'SELL',
+          type: isCash ? 'WITHDRAW' : 'SELL',
           market: stock.market,
           currency: stock.currency,
           ticker: stock.ticker,
@@ -2082,15 +2232,19 @@
           price: sellPrice,
           fee,
           date,
-          memo: memo || '포트폴리오 매도'
+          memo: memo || (isCash ? '현금 출금' : '포트폴리오 매도')
         });
 
         this.transactions = StorageService.getTransactions();
         modal.classList.remove('active');
 
-        const profit = (sellQty * sellPrice - fee) - (sellQty * avgPrice);
-        const isP = profit >= 0;
-        this.showToast(`[${stock.name}] ${sellQty}주 매도 완료! (실현손익: ${isP ? '+' : ''}${CalculatorService.formatCurrency(profit, stock.currency)})`, 'success');
+        if (isCash) {
+          this.showToast(`[${stock.name}] ${stock.currency === 'USD' ? '$' + sellQty : sellQty + '원'} 출금이 완료되었습니다.`, 'success');
+        } else {
+          const profit = (sellQty * sellPrice - fee) - (sellQty * avgPrice);
+          const isP = profit >= 0;
+          this.showToast(`[${stock.name}] ${sellQty}주 매도 완료! (실현손익: ${isP ? '+' : ''}${CalculatorService.formatCurrency(profit, stock.currency)})`, 'success');
+        }
         this.render();
       });
     }
@@ -2098,28 +2252,32 @@
     openEditStockModal(stock) {
       const modal = document.getElementById('app-modal');
       const body = document.getElementById('modal-body');
-      document.getElementById('modal-title').textContent = `⚙️ [${stock.name || stock.ticker}] 정보 수정`;
+      const isCash = stock.market === 'CASH';
+
+      document.getElementById('modal-title').textContent = isCash 
+        ? `⚙️ [${stock.name || stock.ticker}] 현금 잔고 수정`
+        : `⚙️ [${stock.name || stock.ticker}] 정보 수정`;
 
       body.innerHTML = `
         <form id="form-edit-stock">
           <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 1rem;">
-            보유 수량, 평균 매입단가(평단가), 현재가를 직접 수정하여 포트폴리오를 빠르게 보정할 수 있습니다.
+            ${isCash ? '현재 보유 중인 현금(예수금) 잔액을 직접 수정하여 포트폴리오를 빠르게 보정할 수 있습니다.' : '보유 수량, 평균 매입단가(평단가), 현재가를 직접 수정하여 포트폴리오를 빠르게 보정할 수 있습니다.'}
           </p>
           <div class="form-group">
-            <label class="form-label">보유 수량 (주)</label>
+            <label class="form-label">${isCash ? `보유 잔액 (${stock.currency === 'USD' ? '달러 $' : '원 ₩'})` : '보유 수량 (주)'}</label>
             <input type="number" id="edit-stock-qty" class="form-input" value="${stock.quantity}" step="any" min="0" required>
           </div>
-          <div class="form-group">
+          <div class="form-group" style="${isCash ? 'display: none;' : ''}">
             <label class="form-label">평균 매입단가 (평단가 / ${stock.currency})</label>
-            <input type="number" id="edit-stock-avg" class="form-input" value="${stock.avgPrice}" step="any" min="0" required>
+            <input type="number" id="edit-stock-avg" class="form-input" value="${isCash ? 1 : stock.avgPrice}" step="any" min="0" required>
           </div>
-          <div class="form-group">
+          <div class="form-group" style="${isCash ? 'display: none;' : ''}">
             <label class="form-label">현재가 (${stock.currency})</label>
-            <input type="number" id="edit-stock-cur-price" class="form-input" value="${stock.price}" step="any" min="0" required>
+            <input type="number" id="edit-stock-cur-price" class="form-input" value="${isCash ? 1 : stock.price}" step="any" min="0" required>
           </div>
           <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
             <button type="submit" class="btn btn-primary" style="flex: 1;">수정 내용 저장</button>
-            <button type="button" id="btn-modal-delete-holding" class="btn btn-danger btn-sm" style="padding: 0 0.85rem;">🗑️ 종목 삭제</button>
+            <button type="button" id="btn-modal-delete-holding" class="btn btn-danger btn-sm" style="padding: 0 0.85rem;">🗑️ 자산 삭제</button>
           </div>
         </form>
       `;
@@ -2128,11 +2286,11 @@
       const form = body.querySelector('#form-edit-stock');
 
       body.querySelector('#btn-modal-delete-holding')?.addEventListener('click', () => {
-        if (confirm(`[${stock.name || stock.ticker}] 종목을 포트폴리오에서 삭제하시겠습니까?`)) {
+        if (confirm(`[${stock.name || stock.ticker}] 항목을 포트폴리오에서 삭제하시겠습니까?`)) {
           StorageService.deleteHolding(stock.ticker);
           this.transactions = StorageService.getTransactions();
           modal.classList.remove('active');
-          this.showToast(`[${stock.name || stock.ticker}] 종목이 삭제되었습니다.`, 'info');
+          this.showToast(`[${stock.name || stock.ticker}] 항목이 삭제되었습니다.`, 'info');
           this.render();
         }
       });
@@ -2140,8 +2298,8 @@
       form.addEventListener('submit', (e) => {
         e.preventDefault();
         const newQty = parseFloat(form.querySelector('#edit-stock-qty').value);
-        const newAvg = parseFloat(form.querySelector('#edit-stock-avg').value);
-        const newPrice = parseFloat(form.querySelector('#edit-stock-cur-price').value);
+        const newAvg = isCash ? 1 : parseFloat(form.querySelector('#edit-stock-avg').value);
+        const newPrice = isCash ? 1 : parseFloat(form.querySelector('#edit-stock-cur-price').value);
 
         if (isNaN(newQty) || isNaN(newAvg) || isNaN(newPrice)) return;
 
