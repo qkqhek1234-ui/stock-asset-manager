@@ -221,17 +221,28 @@
       }
     },
     saveTransactions(list) {
-      try { localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(list)); } catch (e) {}
+      try { 
+        localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(list));
+        if (typeof SupabaseService !== 'undefined' && SupabaseService.user) {
+          SupabaseService.uploadAllToCloud(list).catch(() => {});
+        }
+      } catch (e) {}
     },
     addTransaction(tx) {
       const list = this.getTransactions();
       const newTx = { id: `tx_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`, ...tx };
       list.push(newTx);
       this.saveTransactions(list);
+      if (typeof SupabaseService !== 'undefined' && SupabaseService.user) {
+        SupabaseService.pushTransaction(newTx).catch(() => {});
+      }
       return newTx;
     },
     deleteTransaction(id) {
       this.saveTransactions(this.getTransactions().filter((t) => t.id !== id));
+      if (typeof SupabaseService !== 'undefined' && SupabaseService.user) {
+        SupabaseService.removeTransaction(id).catch(() => {});
+      }
     },
     deleteHolding(ticker) {
       const clean = ticker.trim().toUpperCase();
@@ -349,14 +360,12 @@
 
       // 2. Fetch from backend /api/search
       let remoteMatches = [];
-      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        try {
-          const res = await fetch(`/api/search?q=${encodeURIComponent(keyword.trim())}`);
-          if (res.ok) {
-            remoteMatches = await res.json();
-          }
-        } catch (e) {}
-      }
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(keyword.trim())}`);
+        if (res.ok) {
+          remoteMatches = await res.json();
+        }
+      } catch (e) {}
 
       // Merge and deduplicate
       const seen = new Set();
@@ -379,15 +388,14 @@
     },
 
     async fetchExchangeRate() {
-      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        try {
-          const res = await fetch('/api/exchange-rate');
-          if (res.ok) {
-            const data = await res.json();
-            if (data?.rate) return data.rate;
-          }
-        } catch (e) {}
-      }
+      try {
+        const res = await fetch('/api/exchange-rate');
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.rate) return data.rate;
+        }
+      } catch (e) {}
+
       try {
         const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/USDKRW=X?interval=1d&range=1d')}`);
         if (res.ok) {
@@ -401,15 +409,13 @@
 
     async fetchQuote(ticker, market = 'US') {
       const clean = ticker.trim().toUpperCase();
-      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        try {
-          const res = await fetch(`/api/quote?ticker=${encodeURIComponent(clean)}`);
-          if (res.ok) {
-            const data = await res.json();
-            if (data?.price) return { ticker: clean, price: data.price, changePercent: data.changePercent || 0, currency: data.currency || (market === 'KR' ? 'KRW' : 'USD') };
-          }
-        } catch (e) {}
-      }
+      try {
+        const res = await fetch(`/api/quote?ticker=${encodeURIComponent(clean)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.price) return { ticker: clean, price: data.price, changePercent: data.changePercent || 0, currency: data.currency || (market === 'KR' ? 'KRW' : 'USD') };
+        }
+      } catch (e) {}
 
       try {
         const yahooSymbol = (clean.length === 6 && !isNaN(clean)) ? `${clean}.KS` : clean;
@@ -445,6 +451,164 @@
       });
       await Promise.allSettled(promises);
       return results;
+    }
+  };
+
+  // =========================================================================
+  // 3.5 SUPABASE CLOUD SYNC SERVICE
+  // =========================================================================
+  const SupabaseService = {
+    client: null,
+    user: null,
+
+    async init() {
+      const config = this.getConfig();
+      if (config.url && config.key && window.supabase) {
+        try {
+          this.client = window.supabase.createClient(config.url, config.key);
+          await this.checkSession();
+        } catch (e) {
+          console.log('Supabase initialization notice:', e);
+        }
+      }
+    },
+
+    getConfig() {
+      try {
+        const raw = localStorage.getItem('sam_supabase_config');
+        return raw ? JSON.parse(raw) : { url: '', key: '' };
+      } catch (e) {
+        return { url: '', key: '' };
+      }
+    },
+
+    saveConfig(url, key) {
+      localStorage.setItem('sam_supabase_config', JSON.stringify({ url: url.trim(), key: key.trim() }));
+      return this.init();
+    },
+
+    async checkSession() {
+      if (!this.client) return null;
+      try {
+        const { data: { session } } = await this.client.auth.getSession();
+        this.user = session?.user || null;
+        return this.user;
+      } catch (e) {
+        return null;
+      }
+    },
+
+    async signUp(email, password) {
+      if (!this.client) throw new Error('먼저 Supabase URL과 Key를 설정해주세요.');
+      const { data, error } = await this.client.auth.signUp({ email: email.trim(), password: password.trim() });
+      if (error) throw error;
+      this.user = data?.user || null;
+      return data;
+    },
+
+    async signIn(email, password) {
+      if (!this.client) throw new Error('먼저 Supabase URL과 Key를 설정해주세요.');
+      const { data, error } = await this.client.auth.signInWithPassword({ email: email.trim(), password: password.trim() });
+      if (error) throw error;
+      this.user = data?.user || null;
+      return data;
+    },
+
+    async signOut() {
+      if (this.client) {
+        await this.client.auth.signOut();
+      }
+      this.user = null;
+    },
+
+    async uploadAllToCloud(localTransactions = []) {
+      if (!this.client || !this.user) return false;
+      try {
+        const rows = localTransactions.map(t => ({
+          id: t.id,
+          user_id: this.user.id,
+          type: t.type,
+          market: t.market || (t.currency === 'USD' ? 'US' : 'KR'),
+          currency: t.currency || 'USD',
+          ticker: t.ticker,
+          name: t.name || t.ticker,
+          quantity: t.quantity,
+          price: t.price,
+          buy_price: t.buyPrice || null,
+          fee: t.fee || 0,
+          date: t.date,
+          memo: t.memo || ''
+        }));
+
+        if (rows.length > 0) {
+          const { error } = await this.client.from('transactions').upsert(rows, { onConflict: 'id' });
+          if (error) throw error;
+        }
+        return true;
+      } catch (e) {
+        console.error('Failed to upload to Supabase:', e);
+        throw e;
+      }
+    },
+
+    async downloadFromCloud() {
+      if (!this.client || !this.user) return null;
+      try {
+        const { data, error } = await this.client
+          .from('transactions')
+          .select('*')
+          .eq('user_id', this.user.id)
+          .order('date', { ascending: false });
+
+        if (error) throw error;
+        if (!data) return [];
+
+        return data.map(r => ({
+          id: r.id,
+          type: r.type,
+          market: r.market,
+          currency: r.currency,
+          ticker: r.ticker,
+          name: r.name,
+          quantity: parseFloat(r.quantity),
+          price: parseFloat(r.price),
+          buyPrice: r.buy_price ? parseFloat(r.buy_price) : null,
+          fee: parseFloat(r.fee) || 0,
+          date: r.date,
+          memo: r.memo || ''
+        }));
+      } catch (e) {
+        console.error('Failed to download from Supabase:', e);
+        return null;
+      }
+    },
+
+    async pushTransaction(tx) {
+      if (!this.client || !this.user) return;
+      try {
+        await this.client.from('transactions').upsert({
+          id: tx.id,
+          user_id: this.user.id,
+          type: tx.type,
+          market: tx.market || (tx.currency === 'USD' ? 'US' : 'KR'),
+          currency: tx.currency || 'USD',
+          ticker: tx.ticker,
+          name: tx.name || tx.ticker,
+          quantity: tx.quantity,
+          price: tx.price,
+          buy_price: tx.buyPrice || null,
+          fee: tx.fee || 0,
+          date: tx.date,
+          memo: tx.memo || ''
+        });
+      } catch (e) {}
+    },
+
+    async removeTransaction(id) {
+      if (!this.client || !this.user) return;
+      try {
+        await this.client.from('transactions').delete().eq('id', id).eq('user_id', this.user.id);
+      } catch (e) {}
     }
   };
 
@@ -504,10 +668,22 @@
       this.init();
     }
 
-    init() {
+    async init() {
       this.applyTheme();
       this.setupDOMEvents();
       this.render();
+
+      // Initialize Supabase & Auto-sync if logged in
+      await SupabaseService.init();
+      if (SupabaseService.user) {
+        const cloudTxs = await SupabaseService.downloadFromCloud();
+        if (cloudTxs && cloudTxs.length > 0) {
+          this.transactions = cloudTxs;
+          StorageService.saveTransactions(this.transactions);
+          this.render();
+        }
+      }
+
       setTimeout(() => this.refreshQuotes(true), 500);
     }
 
@@ -1376,13 +1552,80 @@
 
     // --- VIEW 5: SETTINGS ---
     renderSettings(container) {
+      const supabaseConfig = SupabaseService.getConfig();
+      const isCloudConnected = !!SupabaseService.user;
+
       container.innerHTML = `
         <div style="margin-bottom: 1.25rem;">
           <h2 style="font-size: 1.35rem; font-weight: 700; letter-spacing: -0.02em;">환경 설정 및 데이터 관리</h2>
-          <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.2rem;">테마, 환율 및 데이터 백업을 설정합니다.</p>
+          <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.2rem;">테마, 환율 및 기기 간 실시간 클라우드 동기화를 설정합니다.</p>
         </div>
 
         <div style="display: flex; flex-direction: column; gap: 1.25rem; max-width: 650px;">
+          <!-- 1. Supabase Cloud Realtime Sync Card -->
+          <div class="card" style="border-color: rgba(59, 130, 246, 0.4); background: linear-gradient(180deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.8) 100%);">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+              <span class="card-title" style="color: #60a5fa;">☁️ Supabase 클라우드 실시간 동기화 (PC ↔ 모바일)</span>
+              ${isCloudConnected ? '<span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; padding: 0.15rem 0.45rem;">🟢 동기화 중</span>' : '<span class="badge" style="background: rgba(148, 163, 184, 0.15); color: #94a3b8; padding: 0.15rem 0.45rem;">미연결</span>'}
+            </div>
+            <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.85rem; line-height: 1.45;">
+              PC와 스마트폰에서 동일한 계정으로 로그인하면 자산 및 매매기록이 <strong>실시간 자동 동기화</strong>됩니다.
+            </p>
+
+            ${!isCloudConnected ? `
+              <!-- Supabase API Credentials Accordion -->
+              <details style="margin-bottom: 0.85rem; background: var(--bg-secondary); padding: 0.65rem 0.75rem; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);" ${supabaseConfig.url ? '' : 'open'}>
+                <summary style="font-size: 0.82rem; font-weight: 600; cursor: pointer; color: var(--text-main);">⚙️ Supabase API 연동 정보 (URL & Key)</summary>
+                <div style="margin-top: 0.65rem; display: flex; flex-direction: column; gap: 0.5rem;">
+                  <div>
+                    <label style="font-size: 0.75rem; color: var(--text-muted);">Supabase Project URL</label>
+                    <input type="text" id="supabase-url" class="form-input" placeholder="https://xxxxxxxx.supabase.co" value="${supabaseConfig.url || ''}" style="font-size: 0.8rem; padding: 0.35rem 0.55rem; width: 100%;">
+                  </div>
+                  <div>
+                    <label style="font-size: 0.75rem; color: var(--text-muted);">Supabase Anon Public Key</label>
+                    <input type="password" id="supabase-key" class="form-input" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." value="${supabaseConfig.key || ''}" style="font-size: 0.8rem; padding: 0.35rem 0.55rem; width: 100%;">
+                  </div>
+                  <button id="btn-save-supabase-config" class="btn btn-secondary btn-sm" style="align-self: flex-start; padding: 0.3rem 0.6rem; font-size: 0.78rem;">
+                    API 정보 저장
+                  </button>
+                </div>
+              </details>
+
+              <!-- Auth Box -->
+              <div style="background: var(--bg-secondary); padding: 0.75rem; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
+                <div style="font-size: 0.85rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--text-main);">🔐 계정 로그인 / 무료 회원가입</div>
+                <div style="display: flex; flex-direction: column; gap: 0.45rem;">
+                  <input type="email" id="auth-email" class="form-input" placeholder="이메일 주소 (예: user@gmail.com)" style="font-size: 0.82rem; padding: 0.38rem 0.6rem; width: 100%;">
+                  <input type="password" id="auth-password" class="form-input" placeholder="비밀번호 (6자리 이상)" style="font-size: 0.82rem; padding: 0.38rem 0.6rem; width: 100%;">
+                  <div style="display: flex; gap: 0.5rem; margin-top: 0.25rem;">
+                    <button id="btn-auth-signin" class="btn btn-primary btn-sm" style="flex: 1;">로그인</button>
+                    <button id="btn-auth-signup" class="btn btn-secondary btn-sm" style="flex: 1;">회원가입</button>
+                  </div>
+                </div>
+              </div>
+            ` : `
+              <!-- Logged In Status -->
+              <div style="background: var(--bg-secondary); padding: 0.85rem; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 0.75rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+                  <div>
+                    <div style="font-size: 0.76rem; color: var(--text-muted);">로그인된 계정:</div>
+                    <div style="font-size: 0.92rem; font-weight: 700; color: #60a5fa; font-family: var(--font-mono);">${SupabaseService.user.email}</div>
+                  </div>
+                  <button id="btn-auth-signout" class="btn btn-secondary btn-sm" style="color: #f87171; padding: 0.3rem 0.6rem; font-size: 0.78rem;">로그아웃</button>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.45rem; border-top: 1px dashed var(--border-subtle); padding-top: 0.65rem;">
+                  <button id="btn-cloud-pull" class="btn btn-primary btn-sm" style="padding: 0.4rem 0.5rem; font-size: 0.78rem;">
+                    🔄 클라우드 데이터 받기
+                  </button>
+                  <button id="btn-cloud-push" class="btn btn-secondary btn-sm" style="padding: 0.4rem 0.5rem; font-size: 0.78rem;">
+                    ☁️ 로컬 ➔ 클라우드 백업
+                  </button>
+                </div>
+              </div>
+            `}
+          </div>
+
           <div class="card">
             <div class="card-header"><span class="card-title">🎨 테마 및 디스플레이 설정</span></div>
             <div class="form-group">
@@ -1407,8 +1650,8 @@
           </div>
 
           <div class="card">
-            <div class="card-header"><span class="card-title">💾 데이터 백업 및 엑셀 내보내기</span></div>
-            <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 1rem;">모든 데이터는 브라우저에 안전하게 저장됩니다.</p>
+            <div class="card-header"><span class="card-title">💾 파일 백업 및 엑셀 내보내기</span></div>
+            <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 1rem;">현재 기기의 데이터를 파일로 다운로드합니다.</p>
             <div style="display: flex; gap: 0.65rem; flex-wrap: wrap;">
               <button id="btn-export-csv" class="btn btn-secondary btn-sm">📊 엑셀(CSV) 다운로드</button>
               <button id="btn-export-json" class="btn btn-secondary btn-sm">📦 백업(JSON) 다운로드</button>
@@ -1422,6 +1665,101 @@
         </div>
       `;
 
+      // Supabase Config Save
+      container.querySelector('#btn-save-supabase-config')?.addEventListener('click', async () => {
+        const url = container.querySelector('#supabase-url').value.trim();
+        const key = container.querySelector('#supabase-key').value.trim();
+        if (!url || !key) {
+          this.showToast('Supabase URL과 Key를 모두 입력해주세요.', 'error');
+          return;
+        }
+        await SupabaseService.saveConfig(url, key);
+        this.showToast('Supabase API 정보가 저장되었습니다.', 'success');
+        this.render();
+      });
+
+      // Supabase Auth Sign In
+      container.querySelector('#btn-auth-signin')?.addEventListener('click', async () => {
+        const email = container.querySelector('#auth-email').value.trim();
+        const password = container.querySelector('#auth-password').value.trim();
+        if (!email || !password) {
+          this.showToast('이메일과 비밀번호를 입력해주세요.', 'error');
+          return;
+        }
+        try {
+          await SupabaseService.signIn(email, password);
+          this.showToast('로그인 성공! 클라우드와 연결되었습니다.', 'success');
+          
+          // Auto pull
+          const cloudTxs = await SupabaseService.downloadFromCloud();
+          if (cloudTxs && cloudTxs.length > 0) {
+            this.transactions = cloudTxs;
+            StorageService.saveTransactions(this.transactions);
+          }
+          this.render();
+        } catch (e) {
+          this.showToast(`로그인 실패: ${e.message}`, 'error');
+        }
+      });
+
+      // Supabase Auth Sign Up
+      container.querySelector('#btn-auth-signup')?.addEventListener('click', async () => {
+        const email = container.querySelector('#auth-email').value.trim();
+        const password = container.querySelector('#auth-password').value.trim();
+        if (!email || !password) {
+          this.showToast('이메일과 비밀번호를 입력해주세요.', 'error');
+          return;
+        }
+        if (password.length < 6) {
+          this.showToast('비밀번호는 최소 6자리 이상이어야 합니다.', 'error');
+          return;
+        }
+        try {
+          await SupabaseService.signUp(email, password);
+          this.showToast('회원가입이 완료되었습니다! 로그인 상태로 전환됩니다.', 'success');
+          // Upload local data to new account
+          if (this.transactions.length > 0) {
+            await SupabaseService.uploadAllToCloud(this.transactions);
+          }
+          this.render();
+        } catch (e) {
+          this.showToast(`회원가입 실패: ${e.message}`, 'error');
+        }
+      });
+
+      // Supabase Sign Out
+      container.querySelector('#btn-auth-signout')?.addEventListener('click', async () => {
+        await SupabaseService.signOut();
+        this.showToast('로그아웃되었습니다.', 'info');
+        this.render();
+      });
+
+      // Cloud Pull
+      container.querySelector('#btn-cloud-pull')?.addEventListener('click', async () => {
+        try {
+          const cloudTxs = await SupabaseService.downloadFromCloud();
+          if (cloudTxs) {
+            this.transactions = cloudTxs;
+            StorageService.saveTransactions(this.transactions);
+            this.render();
+            this.showToast(`클라우드에서 ${cloudTxs.length}건의 거래를 동기화했습니다.`, 'success');
+          }
+        } catch (e) {
+          this.showToast(`동기화 실패: ${e.message}`, 'error');
+        }
+      });
+
+      // Cloud Push
+      container.querySelector('#btn-cloud-push')?.addEventListener('click', async () => {
+        try {
+          await SupabaseService.uploadAllToCloud(this.transactions);
+          this.showToast(`로컬 ${this.transactions.length}건의 거래를 클라우드에 백업했습니다.`, 'success');
+        } catch (e) {
+          this.showToast(`백업 실패: ${e.message}`, 'error');
+        }
+      });
+
+      // Local Settings Save
       container.querySelector('#btn-save-settings')?.addEventListener('click', () => {
         this.settings.theme = container.querySelector('#setting-theme').value;
         this.settings.colorStyle = container.querySelector('#setting-color-style').value;
