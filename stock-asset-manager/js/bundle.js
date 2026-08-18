@@ -113,6 +113,10 @@
         const investedKRW = invested * rate;
         const profitKRW = profit * rate;
 
+        const marketValueUSD = exchangeRate > 0 ? (item.currency === 'USD' ? marketValue : marketValueKRW / exchangeRate) : 0;
+        const investedUSD = exchangeRate > 0 ? (item.currency === 'USD' ? invested : investedKRW / exchangeRate) : 0;
+        const profitUSD = exchangeRate > 0 ? (item.currency === 'USD' ? profit : profitKRW / exchangeRate) : 0;
+
         totalInvestedKRW += investedKRW;
         totalMarketValueKRW += marketValueKRW;
 
@@ -125,6 +129,9 @@
           marketValueKRW,
           investedKRW,
           profitKRW,
+          marketValueUSD,
+          investedUSD,
+          profitUSD,
           changePercent: priceInfo.changePercent || 0
         });
       });
@@ -874,8 +881,8 @@
                 <th class="text-right">보유수량</th>
                 <th class="text-right">평균단가</th>
                 <th class="text-right">현재가 (전일대비)</th>
-                <th class="text-right">평가금액</th>
-                <th class="text-right">평가손익 (수익률)</th>
+                <th class="text-right">평가금액 (KRW / USD)</th>
+                <th class="text-right">평가손익 및 수익률</th>
                 <th class="text-right">비중</th>
                 <th class="text-right" style="min-width: 140px;">관리</th>
               </tr>
@@ -892,24 +899,34 @@
                     <td>
                       <div style="display: flex; align-items: center; gap: 0.4rem;">
                         <span class="badge ${h.market === 'US' ? 'badge-us' : 'badge-kr'}">${h.market}</span>
-                        <strong>${h.name}</strong>
+                        <strong style="font-size: 0.93rem;">${h.name}</strong>
                       </div>
                       <div style="font-size: 0.75rem; color: var(--text-dim); font-family: var(--font-mono); margin-top: 0.15rem;">${h.ticker}</div>
                     </td>
-                    <td class="text-right" style="font-family: var(--font-mono); font-weight: 600;">${CalculatorService.formatNumber(h.quantity, h.market === 'US' ? 2 : 0)}주</td>
-                    <td class="text-right" style="font-family: var(--font-mono);">${CalculatorService.formatCurrency(h.avgPrice, h.currency)}</td>
+                    <td class="text-right" style="font-family: var(--font-mono); font-weight: 600; font-size: 0.9rem;">${CalculatorService.formatNumber(h.quantity, h.market === 'US' ? 2 : 0)}주</td>
+                    <td class="text-right" style="font-family: var(--font-mono); font-size: 0.88rem;">${CalculatorService.formatCurrency(h.avgPrice, h.currency)}</td>
                     <td class="text-right" style="font-family: var(--font-mono);">
-                      <div style="font-weight: 600;">${CalculatorService.formatCurrency(h.currentPrice, h.currency)}</div>
+                      <div style="font-weight: 600; font-size: 0.9rem;">${CalculatorService.formatCurrency(h.currentPrice, h.currency)}</div>
                       <div style="font-size: 0.76rem; font-weight: 600;" class="${isDayP ? 'profit-text' : 'loss-text'}">
                         ${daySign}${change.toFixed(2)}% ${isDayP ? '▲' : '▼'}
                       </div>
                     </td>
-                    <td class="text-right" style="font-family: var(--font-mono); font-weight: 700;">${CalculatorService.formatCurrency(h.marketValueKRW, 'KRW')}</td>
                     <td class="text-right" style="font-family: var(--font-mono);">
-                      <div class="${isP ? 'profit-text' : 'loss-text'}" style="font-weight: 700;">${isP ? '+' : ''}${CalculatorService.formatCurrency(h.profitKRW, 'KRW')}</div>
-                      <div class="${isP ? 'profit-badge' : 'loss-badge'}" style="font-size: 0.72rem; margin-top: 0.15rem;">${CalculatorService.formatPercent(h.returnRate)}</div>
+                      <div style="font-weight: 700; font-size: 0.95rem; color: var(--text-main);">${CalculatorService.formatCurrency(h.marketValueKRW, 'KRW')}</div>
+                      <div style="font-size: 0.76rem; color: #38bdf8; font-weight: 600; margin-top: 0.15rem;">${CalculatorService.formatCurrency(h.marketValueUSD, 'USD')}</div>
                     </td>
-                    <td class="text-right" style="font-family: var(--font-mono); font-weight: 600;">${h.weightPercent.toFixed(1)}%</td>
+                    <td class="text-right" style="font-family: var(--font-mono);">
+                      <div class="${isP ? 'profit-text' : 'loss-text'}" style="font-weight: 700; font-size: 0.92rem;">${isP ? '+' : ''}${CalculatorService.formatCurrency(h.profitKRW, 'KRW')}</div>
+                      <div style="display: flex; justify-content: flex-end; align-items: center; gap: 0.35rem; margin-top: 0.2rem;">
+                        <span class="${isP ? 'profit-text' : 'loss-text'}" style="font-size: 0.76rem; opacity: 0.9; font-weight: 600;">
+                          ${isP ? '+' : ''}${CalculatorService.formatCurrency(h.profitUSD, 'USD')}
+                        </span>
+                        <span class="${isP ? 'profit-badge' : 'loss-badge'}" style="font-size: 0.72rem; padding: 0.08rem 0.38rem; font-weight: 700;">
+                          ${CalculatorService.formatPercent(h.returnRate)}
+                        </span>
+                      </div>
+                    </td>
+                    <td class="text-right" style="font-family: var(--font-mono); font-weight: 600; font-size: 0.9rem;">${h.weightPercent.toFixed(1)}%</td>
                     <td class="text-right">
                       <div style="display: flex; justify-content: flex-end; gap: 0.35rem;">
                         <button class="btn btn-sm btn-sell-stock" 
@@ -961,32 +978,43 @@
                   </div>
                 </div>
 
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.45rem 0.6rem; background: var(--bg-secondary); padding: 0.65rem 0.8rem; border-radius: var(--radius-sm); font-size: 0.82rem; margin-bottom: 0.75rem;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 0.6rem; background: var(--bg-secondary); padding: 0.7rem 0.85rem; border-radius: var(--radius-sm); font-size: 0.82rem; margin-bottom: 0.75rem;">
+                  <!-- 1. 보유수량 & 평단가 -->
                   <div>
-                    <div style="color: var(--text-muted); font-size: 0.72rem;">보유 / 평단가</div>
-                    <div style="font-weight: 600; font-family: var(--font-mono); font-size: 0.84rem;">
-                      ${CalculatorService.formatNumber(h.quantity, h.market === 'US' ? 2 : 0)}주 · ${CalculatorService.formatCurrency(h.avgPrice, h.currency)}
+                    <div style="color: var(--text-muted); font-size: 0.72rem;">보유수량 · 평단가</div>
+                    <div style="font-weight: 600; font-family: var(--font-mono); font-size: 0.84rem; margin-top: 0.1rem;">
+                      ${CalculatorService.formatNumber(h.quantity, h.market === 'US' ? 2 : 0)}주 @ ${CalculatorService.formatCurrency(h.avgPrice, h.currency)}
                     </div>
                   </div>
+
+                  <!-- 2. 평가금액 (KRW / USD) -->
                   <div style="text-align: right;">
-                    <div style="color: var(--text-muted); font-size: 0.72rem;">평가금액 (KRW)</div>
-                    <div style="font-weight: 700; font-family: var(--font-mono); font-size: 0.88rem;">
+                    <div style="color: var(--text-muted); font-size: 0.72rem;">평가금액</div>
+                    <div style="font-weight: 700; font-family: var(--font-mono); font-size: 0.88rem; color: var(--text-main);">
                       ${CalculatorService.formatCurrency(h.marketValueKRW, 'KRW')}
                     </div>
+                    <div style="font-size: 0.74rem; color: #38bdf8; font-family: var(--font-mono); font-weight: 600;">
+                      ${CalculatorService.formatCurrency(h.marketValueUSD, 'USD')}
+                    </div>
                   </div>
+
+                  <!-- 3. 평가손익 (KRW / USD) -->
                   <div>
-                    <div style="color: var(--text-muted); font-size: 0.72rem;">평가손익</div>
+                    <div style="color: var(--text-muted); font-size: 0.72rem;">평가손익 (원화 / 달러)</div>
                     <div class="${isP ? 'profit-text' : 'loss-text'}" style="font-weight: 700; font-family: var(--font-mono); font-size: 0.88rem;">
                       ${isP ? '+' : ''}${CalculatorService.formatCurrency(h.profitKRW, 'KRW')}
                     </div>
-                  </div>
-                  <div style="text-align: right;">
-                    <div style="color: var(--text-muted); font-size: 0.72rem;">수익률</div>
-                    <div>
-                      <span class="${isP ? 'profit-badge' : 'loss-badge'}" style="font-size: 0.76rem; padding: 0.1rem 0.45rem;">
-                        ${CalculatorService.formatPercent(h.returnRate)}
-                      </span>
+                    <div class="${isP ? 'profit-text' : 'loss-text'}" style="font-size: 0.74rem; font-family: var(--font-mono); opacity: 0.9;">
+                      ${isP ? '+' : ''}${CalculatorService.formatCurrency(h.profitUSD, 'USD')}
                     </div>
+                  </div>
+
+                  <!-- 4. 수익률 -->
+                  <div style="text-align: right; display: flex; flex-direction: column; justify-content: center; align-items: flex-end;">
+                    <div style="color: var(--text-muted); font-size: 0.72rem; margin-bottom: 0.15rem;">수익률</div>
+                    <span class="${isP ? 'profit-badge' : 'loss-badge'}" style="font-size: 0.8rem; padding: 0.12rem 0.5rem; font-weight: 700; font-family: var(--font-mono);">
+                      ${CalculatorService.formatPercent(h.returnRate)}
+                    </span>
                   </div>
                 </div>
 
