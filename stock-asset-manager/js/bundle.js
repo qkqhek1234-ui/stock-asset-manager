@@ -223,8 +223,9 @@
     saveTransactions(list) {
       try { 
         localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(list));
-        if (typeof SupabaseService !== 'undefined' && SupabaseService.user) {
-          SupabaseService.uploadAllToCloud(list).catch(() => {});
+        if (typeof SyncKeyService !== 'undefined' && SyncKeyService.getSyncKey() && SyncKeyService.isAutoSyncEnabled()) {
+          const settings = this.getSettings();
+          SyncKeyService.pushToCloud(list, settings).catch(() => {});
         }
       } catch (e) {}
     },
@@ -233,16 +234,10 @@
       const newTx = { id: `tx_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`, ...tx };
       list.push(newTx);
       this.saveTransactions(list);
-      if (typeof SupabaseService !== 'undefined' && SupabaseService.user) {
-        SupabaseService.pushTransaction(newTx).catch(() => {});
-      }
       return newTx;
     },
     deleteTransaction(id) {
       this.saveTransactions(this.getTransactions().filter((t) => t.id !== id));
-      if (typeof SupabaseService !== 'undefined' && SupabaseService.user) {
-        SupabaseService.removeTransaction(id).catch(() => {});
-      }
     },
     deleteHolding(ticker) {
       const clean = ticker.trim().toUpperCase();
@@ -455,160 +450,95 @@
   };
 
   // =========================================================================
-  // 3.5 SUPABASE CLOUD SYNC SERVICE
+  // 3.5 SYNC KEY MULTI-DEVICE CLOUD SERVICE (비밀 동기화 키 방식)
   // =========================================================================
-  const SupabaseService = {
-    client: null,
-    user: null,
+  const SyncKeyService = {
+    KEY_STORAGE: 'sam_sync_key',
+    AUTOSYNC_STORAGE: 'sam_autosync_enabled',
 
-    async init() {
-      const config = this.getConfig();
-      if (config.url && config.key && window.supabase) {
-        try {
-          this.client = window.supabase.createClient(config.url, config.key);
-          await this.checkSession();
-        } catch (e) {
-          console.log('Supabase initialization notice:', e);
-        }
-      }
-    },
-
-    getConfig() {
+    getSyncKey() {
       try {
-        const raw = localStorage.getItem('sam_supabase_config');
-        return raw ? JSON.parse(raw) : { url: '', key: '' };
+        return (localStorage.getItem(this.KEY_STORAGE) || '').trim().toUpperCase();
       } catch (e) {
-        return { url: '', key: '' };
+        return '';
       }
     },
 
-    saveConfig(url, key) {
-      localStorage.setItem('sam_supabase_config', JSON.stringify({ url: url.trim(), key: key.trim() }));
-      return this.init();
-    },
-
-    async checkSession() {
-      if (!this.client) return null;
+    setSyncKey(key) {
+      const clean = (key || '').trim().toUpperCase();
       try {
-        const { data: { session } } = await this.client.auth.getSession();
-        this.user = session?.user || null;
-        return this.user;
-      } catch (e) {
-        return null;
-      }
-    },
-
-    async signUp(email, password) {
-      if (!this.client) throw new Error('먼저 Supabase URL과 Key를 설정해주세요.');
-      const { data, error } = await this.client.auth.signUp({ email: email.trim(), password: password.trim() });
-      if (error) throw error;
-      this.user = data?.user || null;
-      return data;
-    },
-
-    async signIn(email, password) {
-      if (!this.client) throw new Error('먼저 Supabase URL과 Key를 설정해주세요.');
-      const { data, error } = await this.client.auth.signInWithPassword({ email: email.trim(), password: password.trim() });
-      if (error) throw error;
-      this.user = data?.user || null;
-      return data;
-    },
-
-    async signOut() {
-      if (this.client) {
-        await this.client.auth.signOut();
-      }
-      this.user = null;
-    },
-
-    async uploadAllToCloud(localTransactions = []) {
-      if (!this.client || !this.user) return false;
-      try {
-        const rows = localTransactions.map(t => ({
-          id: t.id,
-          user_id: this.user.id,
-          type: t.type,
-          market: t.market || (t.currency === 'USD' ? 'US' : 'KR'),
-          currency: t.currency || 'USD',
-          ticker: t.ticker,
-          name: t.name || t.ticker,
-          quantity: t.quantity,
-          price: t.price,
-          buy_price: t.buyPrice || null,
-          fee: t.fee || 0,
-          date: t.date,
-          memo: t.memo || ''
-        }));
-
-        if (rows.length > 0) {
-          const { error } = await this.client.from('transactions').upsert(rows, { onConflict: 'id' });
-          if (error) throw error;
+        if (clean) {
+          localStorage.setItem(this.KEY_STORAGE, clean);
+        } else {
+          localStorage.removeItem(this.KEY_STORAGE);
         }
+      } catch (e) {}
+      return clean;
+    },
+
+    generateNewKey() {
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      const part1 = Array.from({ length: 4 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+      const part2 = Array.from({ length: 4 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+      const newKey = `SAM-${part1}-${part2}`;
+      this.setSyncKey(newKey);
+      return newKey;
+    },
+
+    isAutoSyncEnabled() {
+      try {
+        return localStorage.getItem(this.AUTOSYNC_STORAGE) !== 'false';
+      } catch (e) {
         return true;
-      } catch (e) {
-        console.error('Failed to upload to Supabase:', e);
-        throw e;
       }
     },
 
-    async downloadFromCloud() {
-      if (!this.client || !this.user) return null;
+    setAutoSync(enabled) {
       try {
-        const { data, error } = await this.client
-          .from('transactions')
-          .select('*')
-          .eq('user_id', this.user.id)
-          .order('date', { ascending: false });
+        localStorage.setItem(this.AUTOSYNC_STORAGE, enabled ? 'true' : 'false');
+      } catch (e) {}
+    },
 
-        if (error) throw error;
-        if (!data) return [];
+    // Push local data to Cloud
+    async pushToCloud(transactions = [], settings = {}) {
+      const key = this.getSyncKey();
+      if (!key) throw new Error('동기화 키가 설정되지 않았습니다.');
 
-        return data.map(r => ({
-          id: r.id,
-          type: r.type,
-          market: r.market,
-          currency: r.currency,
-          ticker: r.ticker,
-          name: r.name,
-          quantity: parseFloat(r.quantity),
-          price: parseFloat(r.price),
-          buyPrice: r.buy_price ? parseFloat(r.buy_price) : null,
-          fee: parseFloat(r.fee) || 0,
-          date: r.date,
-          memo: r.memo || ''
-        }));
-      } catch (e) {
-        console.error('Failed to download from Supabase:', e);
-        return null;
+      const payload = {
+        transactions,
+        settings,
+        clientTime: new Date().toISOString()
+      };
+
+      const res = await fetch('/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, payload })
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || '클라우드 백업에 실패했습니다.');
       }
+
+      return await res.json();
     },
 
-    async pushTransaction(tx) {
-      if (!this.client || !this.user) return;
-      try {
-        await this.client.from('transactions').upsert({
-          id: tx.id,
-          user_id: this.user.id,
-          type: tx.type,
-          market: tx.market || (tx.currency === 'USD' ? 'US' : 'KR'),
-          currency: tx.currency || 'USD',
-          ticker: tx.ticker,
-          name: tx.name || tx.ticker,
-          quantity: tx.quantity,
-          price: tx.price,
-          buy_price: tx.buyPrice || null,
-          fee: tx.fee || 0,
-          date: tx.date,
-          memo: tx.memo || ''
-        });
-      } catch (e) {}
-    },
+    // Pull cloud data to Local
+    async pullFromCloud() {
+      const key = this.getSyncKey();
+      if (!key) return null;
 
-    async removeTransaction(id) {
-      if (!this.client || !this.user) return;
-      try {
-        await this.client.from('transactions').delete().eq('id', id).eq('user_id', this.user.id);
-      } catch (e) {}
+      const res = await fetch(`/api/sync?key=${encodeURIComponent(key)}`);
+      if (res.status === 404) {
+        return null; // No data yet on cloud
+      }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || '클라우드 데이터를 불러오는데 실패했습니다.');
+      }
+
+      return await res.json();
     }
   };
 
@@ -673,14 +603,23 @@
       this.setupDOMEvents();
       this.render();
 
-      // Initialize Supabase & Auto-sync if logged in
-      await SupabaseService.init();
-      if (SupabaseService.user) {
-        const cloudTxs = await SupabaseService.downloadFromCloud();
-        if (cloudTxs && cloudTxs.length > 0) {
-          this.transactions = cloudTxs;
-          StorageService.saveTransactions(this.transactions);
-          this.render();
+      // Auto Sync with Cloud if Sync Key is set
+      const syncKey = SyncKeyService.getSyncKey();
+      if (syncKey && SyncKeyService.isAutoSyncEnabled()) {
+        try {
+          const cloudData = await SyncKeyService.pullFromCloud();
+          if (cloudData && Array.isArray(cloudData.transactions) && cloudData.transactions.length > 0) {
+            this.transactions = cloudData.transactions;
+            StorageService.saveTransactions(this.transactions);
+            if (cloudData.settings) {
+              this.settings = { ...this.settings, ...cloudData.settings };
+              StorageService.saveSettings(this.settings);
+              this.applyTheme();
+            }
+            this.render();
+          }
+        } catch (e) {
+          console.log('Auto sync notice:', e);
         }
       }
 
@@ -1552,78 +1491,56 @@
 
     // --- VIEW 5: SETTINGS ---
     renderSettings(container) {
-      const supabaseConfig = SupabaseService.getConfig();
-      const isCloudConnected = !!SupabaseService.user;
+      const currentSyncKey = SyncKeyService.getSyncKey();
+      const isAutoSync = SyncKeyService.isAutoSyncEnabled();
 
       container.innerHTML = `
         <div style="margin-bottom: 1.25rem;">
-          <h2 style="font-size: 1.35rem; font-weight: 700; letter-spacing: -0.02em;">환경 설정 및 데이터 관리</h2>
-          <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.2rem;">테마, 환율 및 기기 간 실시간 클라우드 동기화를 설정합니다.</p>
+          <h2 style="font-size: 1.35rem; font-weight: 700; letter-spacing: -0.02em;">환경 설정 및 데이터 동기화</h2>
+          <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.2rem;">동기화 키, 테마, 환율 및 데이터 백업을 설정합니다.</p>
         </div>
 
         <div style="display: flex; flex-direction: column; gap: 1.25rem; max-width: 650px;">
-          <!-- 1. Supabase Cloud Realtime Sync Card -->
+          <!-- 1. Sync Key Multi-Device Cloud Sync Card -->
           <div class="card" style="border-color: rgba(59, 130, 246, 0.4); background: linear-gradient(180deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.8) 100%);">
             <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
-              <span class="card-title" style="color: #60a5fa;">☁️ Supabase 클라우드 실시간 동기화 (PC ↔ 모바일)</span>
-              ${isCloudConnected ? '<span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; padding: 0.15rem 0.45rem;">🟢 동기화 중</span>' : '<span class="badge" style="background: rgba(148, 163, 184, 0.15); color: #94a3b8; padding: 0.15rem 0.45rem;">미연결</span>'}
+              <span class="card-title" style="color: #60a5fa;">🔑 나만의 비밀 동기화 키 (PC ↔ 스마트폰)</span>
+              ${currentSyncKey ? '<span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; padding: 0.15rem 0.45rem;">🟢 동기화 연결됨</span>' : '<span class="badge" style="background: rgba(148, 163, 184, 0.15); color: #94a3b8; padding: 0.15rem 0.45rem;">키 미설정</span>'}
             </div>
             <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.85rem; line-height: 1.45;">
-              PC와 스마트폰에서 동일한 계정으로 로그인하면 자산 및 매매기록이 <strong>실시간 자동 동기화</strong>됩니다.
+              회원가입 없이 <strong>비밀 동기화 키</strong> 하나로 PC와 스마트폰의 자산 및 매매기록을 실시간 공유합니다.
             </p>
 
-            ${!isCloudConnected ? `
-              <!-- Supabase API Credentials Accordion -->
-              <details style="margin-bottom: 0.85rem; background: var(--bg-secondary); padding: 0.65rem 0.75rem; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);" ${supabaseConfig.url ? '' : 'open'}>
-                <summary style="font-size: 0.82rem; font-weight: 600; cursor: pointer; color: var(--text-main);">⚙️ Supabase API 연동 정보 (URL & Key)</summary>
-                <div style="margin-top: 0.65rem; display: flex; flex-direction: column; gap: 0.5rem;">
-                  <div>
-                    <label style="font-size: 0.75rem; color: var(--text-muted);">Supabase Project URL</label>
-                    <input type="text" id="supabase-url" class="form-input" placeholder="https://xxxxxxxx.supabase.co" value="${supabaseConfig.url || ''}" style="font-size: 0.8rem; padding: 0.35rem 0.55rem; width: 100%;">
-                  </div>
-                  <div>
-                    <label style="font-size: 0.75rem; color: var(--text-muted);">Supabase Anon Public Key</label>
-                    <input type="password" id="supabase-key" class="form-input" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." value="${supabaseConfig.key || ''}" style="font-size: 0.8rem; padding: 0.35rem 0.55rem; width: 100%;">
-                  </div>
-                  <button id="btn-save-supabase-config" class="btn btn-secondary btn-sm" style="align-self: flex-start; padding: 0.3rem 0.6rem; font-size: 0.78rem;">
-                    API 정보 저장
-                  </button>
-                </div>
-              </details>
-
-              <!-- Auth Box -->
-              <div style="background: var(--bg-secondary); padding: 0.75rem; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle);">
-                <div style="font-size: 0.85rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--text-main);">🔐 계정 로그인 / 무료 회원가입</div>
-                <div style="display: flex; flex-direction: column; gap: 0.45rem;">
-                  <input type="email" id="auth-email" class="form-input" placeholder="이메일 주소 (예: user@gmail.com)" style="font-size: 0.82rem; padding: 0.38rem 0.6rem; width: 100%;">
-                  <input type="password" id="auth-password" class="form-input" placeholder="비밀번호 (6자리 이상)" style="font-size: 0.82rem; padding: 0.38rem 0.6rem; width: 100%;">
-                  <div style="display: flex; gap: 0.5rem; margin-top: 0.25rem;">
-                    <button id="btn-auth-signin" class="btn btn-primary btn-sm" style="flex: 1;">로그인</button>
-                    <button id="btn-auth-signup" class="btn btn-secondary btn-sm" style="flex: 1;">회원가입</button>
-                  </div>
+            <!-- Sync Key Input & Buttons -->
+            <div style="background: var(--bg-secondary); padding: 0.75rem 0.85rem; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 0.65rem;">
+              <div>
+                <label style="font-size: 0.76rem; color: var(--text-muted); display: block; margin-bottom: 0.3rem;">내 동기화 키 (Sync Key)</label>
+                <div style="display: flex; gap: 0.4rem; flex-wrap: wrap;">
+                  <input type="text" id="input-sync-key" class="form-input" placeholder="예: SAM-7A9K-2B8F" value="${currentSyncKey}" style="font-family: var(--font-mono); font-size: 0.95rem; font-weight: 700; letter-spacing: 0.05em; padding: 0.4rem 0.65rem; color: #60a5fa; flex: 1; min-width: 160px; text-transform: uppercase;">
+                  <button id="btn-save-sync-key" class="btn btn-primary btn-sm" style="padding: 0.4rem 0.65rem; white-space: nowrap;">💾 키 저장</button>
+                  <button id="btn-copy-sync-key" class="btn btn-secondary btn-sm" title="복사" style="padding: 0.4rem 0.65rem; white-space: nowrap;">📋 복사</button>
+                  <button id="btn-gen-sync-key" class="btn btn-secondary btn-sm" title="새 키 발급" style="padding: 0.4rem 0.65rem; white-space: nowrap;">✨ 새 키 생성</button>
                 </div>
               </div>
-            ` : `
-              <!-- Logged In Status -->
-              <div style="background: var(--bg-secondary); padding: 0.85rem; border-radius: var(--radius-sm); border: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 0.75rem;">
-                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
-                  <div>
-                    <div style="font-size: 0.76rem; color: var(--text-muted);">로그인된 계정:</div>
-                    <div style="font-size: 0.92rem; font-weight: 700; color: #60a5fa; font-family: var(--font-mono);">${SupabaseService.user.email}</div>
-                  </div>
-                  <button id="btn-auth-signout" class="btn btn-secondary btn-sm" style="color: #f87171; padding: 0.3rem 0.6rem; font-size: 0.78rem;">로그아웃</button>
-                </div>
 
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.45rem; border-top: 1px dashed var(--border-subtle); padding-top: 0.65rem;">
-                  <button id="btn-cloud-pull" class="btn btn-primary btn-sm" style="padding: 0.4rem 0.5rem; font-size: 0.78rem;">
-                    🔄 클라우드 데이터 받기
-                  </button>
-                  <button id="btn-cloud-push" class="btn btn-secondary btn-sm" style="padding: 0.4rem 0.5rem; font-size: 0.78rem;">
-                    ☁️ 로컬 ➔ 클라우드 백업
-                  </button>
-                </div>
+              <!-- Action Buttons -->
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.45rem; margin-top: 0.2rem;">
+                <button id="btn-sync-pull" class="btn btn-primary btn-sm" style="padding: 0.45rem 0.5rem; font-size: 0.8rem;">
+                  🔄 클라우드 데이터 가져오기
+                </button>
+                <button id="btn-sync-push" class="btn btn-secondary btn-sm" style="padding: 0.45rem 0.5rem; font-size: 0.8rem;">
+                  ☁️ 현재 데이터 클라우드에 백업
+                </button>
               </div>
-            `}
+
+              <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px dashed var(--border-subtle); padding-top: 0.5rem; margin-top: 0.2rem; font-size: 0.78rem; color: var(--text-muted); flex-wrap: wrap; gap: 0.4rem;">
+                <span>거래 추가/삭제 시 자동 클라우드 백업</span>
+                <label style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer; color: var(--text-main); font-weight: 600;">
+                  <input type="checkbox" id="chk-autosync" ${isAutoSync ? 'checked' : ''}>
+                  자동 동기화 ON
+                </label>
+              </div>
+            </div>
           </div>
 
           <div class="card">
@@ -1665,98 +1582,89 @@
         </div>
       `;
 
-      // Supabase Config Save
-      container.querySelector('#btn-save-supabase-config')?.addEventListener('click', async () => {
-        const url = container.querySelector('#supabase-url').value.trim();
-        const key = container.querySelector('#supabase-key').value.trim();
-        if (!url || !key) {
-          this.showToast('Supabase URL과 Key를 모두 입력해주세요.', 'error');
-          return;
+      // Save Sync Key
+      container.querySelector('#btn-save-sync-key')?.addEventListener('click', () => {
+        const val = container.querySelector('#input-sync-key').value.trim().toUpperCase();
+        if (!val) {
+          SyncKeyService.setSyncKey('');
+          this.showToast('동기화 키가 해제되었습니다.', 'info');
+        } else {
+          SyncKeyService.setSyncKey(val);
+          this.showToast(`동기화 키 [${val}] 가 저장되었습니다.`, 'success');
         }
-        await SupabaseService.saveConfig(url, key);
-        this.showToast('Supabase API 정보가 저장되었습니다.', 'success');
         this.render();
       });
 
-      // Supabase Auth Sign In
-      container.querySelector('#btn-auth-signin')?.addEventListener('click', async () => {
-        const email = container.querySelector('#auth-email').value.trim();
-        const password = container.querySelector('#auth-password').value.trim();
-        if (!email || !password) {
-          this.showToast('이메일과 비밀번호를 입력해주세요.', 'error');
-          return;
-        }
-        try {
-          await SupabaseService.signIn(email, password);
-          this.showToast('로그인 성공! 클라우드와 연결되었습니다.', 'success');
-          
-          // Auto pull
-          const cloudTxs = await SupabaseService.downloadFromCloud();
-          if (cloudTxs && cloudTxs.length > 0) {
-            this.transactions = cloudTxs;
-            StorageService.saveTransactions(this.transactions);
-          }
-          this.render();
-        } catch (e) {
-          this.showToast(`로그인 실패: ${e.message}`, 'error');
-        }
-      });
-
-      // Supabase Auth Sign Up
-      container.querySelector('#btn-auth-signup')?.addEventListener('click', async () => {
-        const email = container.querySelector('#auth-email').value.trim();
-        const password = container.querySelector('#auth-password').value.trim();
-        if (!email || !password) {
-          this.showToast('이메일과 비밀번호를 입력해주세요.', 'error');
-          return;
-        }
-        if (password.length < 6) {
-          this.showToast('비밀번호는 최소 6자리 이상이어야 합니다.', 'error');
-          return;
-        }
-        try {
-          await SupabaseService.signUp(email, password);
-          this.showToast('회원가입이 완료되었습니다! 로그인 상태로 전환됩니다.', 'success');
-          // Upload local data to new account
-          if (this.transactions.length > 0) {
-            await SupabaseService.uploadAllToCloud(this.transactions);
-          }
-          this.render();
-        } catch (e) {
-          this.showToast(`회원가입 실패: ${e.message}`, 'error');
-        }
-      });
-
-      // Supabase Sign Out
-      container.querySelector('#btn-auth-signout')?.addEventListener('click', async () => {
-        await SupabaseService.signOut();
-        this.showToast('로그아웃되었습니다.', 'info');
+      // Generate New Sync Key
+      container.querySelector('#btn-gen-sync-key')?.addEventListener('click', () => {
+        const newKey = SyncKeyService.generateNewKey();
+        this.showToast(`새 동기화 키 [${newKey}] 가 생성되었습니다!`, 'success');
         this.render();
       });
 
-      // Cloud Pull
-      container.querySelector('#btn-cloud-pull')?.addEventListener('click', async () => {
+      // Copy Sync Key
+      container.querySelector('#btn-copy-sync-key')?.addEventListener('click', () => {
+        const val = container.querySelector('#input-sync-key').value.trim();
+        if (!val) {
+          this.showToast('복사할 동기화 키가 없습니다.', 'error');
+          return;
+        }
+        navigator.clipboard.writeText(val).then(() => {
+          this.showToast('동기화 키가 클립보드에 복사되었습니다.', 'success');
+        }).catch(() => {
+          this.showToast('키 복사 실패 (직접 복사해주세요).', 'error');
+        });
+      });
+
+      // Sync Pull
+      container.querySelector('#btn-sync-pull')?.addEventListener('click', async () => {
+        const key = container.querySelector('#input-sync-key').value.trim().toUpperCase();
+        if (!key) {
+          this.showToast('먼저 동기화 키를 입력하거나 생성해주세요.', 'error');
+          return;
+        }
+        SyncKeyService.setSyncKey(key);
         try {
-          const cloudTxs = await SupabaseService.downloadFromCloud();
-          if (cloudTxs) {
-            this.transactions = cloudTxs;
+          const cloudData = await SyncKeyService.pullFromCloud();
+          if (cloudData && Array.isArray(cloudData.transactions)) {
+            this.transactions = cloudData.transactions;
             StorageService.saveTransactions(this.transactions);
+            if (cloudData.settings) {
+              this.settings = { ...this.settings, ...cloudData.settings };
+              StorageService.saveSettings(this.settings);
+              this.applyTheme();
+            }
             this.render();
-            this.showToast(`클라우드에서 ${cloudTxs.length}건의 거래를 동기화했습니다.`, 'success');
+            this.showToast(`클라우드에서 ${this.transactions.length}건의 거래를 성공적으로 불러왔습니다!`, 'success');
+          } else {
+            this.showToast('클라우드에 저장된 데이터가 없습니다. 먼저 백업을 진행해주세요.', 'info');
           }
         } catch (e) {
-          this.showToast(`동기화 실패: ${e.message}`, 'error');
+          this.showToast(`불러오기 실패: ${e.message}`, 'error');
         }
       });
 
-      // Cloud Push
-      container.querySelector('#btn-cloud-push')?.addEventListener('click', async () => {
+      // Sync Push
+      container.querySelector('#btn-sync-push')?.addEventListener('click', async () => {
+        const key = container.querySelector('#input-sync-key').value.trim().toUpperCase();
+        if (!key) {
+          this.showToast('먼저 동기화 키를 입력하거나 생성해주세요.', 'error');
+          return;
+        }
+        SyncKeyService.setSyncKey(key);
         try {
-          await SupabaseService.uploadAllToCloud(this.transactions);
-          this.showToast(`로컬 ${this.transactions.length}건의 거래를 클라우드에 백업했습니다.`, 'success');
+          await SyncKeyService.pushToCloud(this.transactions, this.settings);
+          this.showToast(`현재 ${this.transactions.length}건의 거래를 클라우드에 안전하게 백업했습니다!`, 'success');
+          this.render();
         } catch (e) {
           this.showToast(`백업 실패: ${e.message}`, 'error');
         }
+      });
+
+      // AutoSync Checkbox
+      container.querySelector('#chk-autosync')?.addEventListener('change', (e) => {
+        SyncKeyService.setAutoSync(e.target.checked);
+        this.showToast(`자동 동기화가 ${e.target.checked ? '활성화' : '비활성화'}되었습니다.`, 'info');
       });
 
       // Local Settings Save

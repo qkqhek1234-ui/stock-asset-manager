@@ -1,0 +1,14 @@
+{
+  "SAM-8K2A-9M4F": {
+    "transactions": [
+      {
+        "id": "tx_1",
+        "name": "삼성전자",
+        "price": 78500
+      }
+    ],
+    "settings": {
+      "theme": "dark"
+    }
+  }
+}

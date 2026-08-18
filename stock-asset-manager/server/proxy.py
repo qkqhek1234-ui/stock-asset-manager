@@ -141,7 +141,85 @@ class CustomHTTPHandler(http.server.SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps([]).encode('utf-8'))
                 return
 
+        # Local Sync API (GET)
+        if parsed_path.path == '/api/sync':
+            query = urllib.parse.parse_qs(parsed_path.query)
+            key = query.get('key', [''])[0].strip().upper()
+            if not key:
+                self.send_error(400, "Missing key parameter")
+                return
+            try:
+                sync_file = os.path.join(BASE_DIR, 'sync_store.json')
+                data = {}
+                if os.path.exists(sync_file):
+                    with open(sync_file, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                
+                if key in data:
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json; charset=utf-8')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps(data[key]).encode('utf-8'))
+                    return
+                else:
+                    self.send_response(404)
+                    self.send_header('Content-Type', 'application/json')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": "No data found for this key"}).encode('utf-8'))
+                    return
+            except Exception as e:
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+                return
+
         return super().do_GET()
+
+    def do_POST(self):
+        parsed_path = urllib.parse.urlparse(self.path)
+        if parsed_path.path == '/api/sync':
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length).decode('utf-8')
+                payload = json.loads(body)
+                key = payload.get('key', '').strip().upper()
+                data_obj = payload.get('payload', {})
+                if not key or not data_obj:
+                    self.send_error(400, "Missing key or payload")
+                    return
+
+                sync_file = os.path.join(BASE_DIR, 'sync_store.json')
+                store = {}
+                if os.path.exists(sync_file):
+                    try:
+                        with open(sync_file, 'r', encoding='utf-8') as f:
+                            store = json.load(f)
+                    except Exception:
+                        store = {}
+                
+                store[key] = data_obj
+                with open(sync_file, 'w', encoding='utf-8') as f:
+                    json.dump(store, f, ensure_ascii=False, indent=2)
+
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": True, "key": key}).encode('utf-8'))
+                return
+            except Exception as e:
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+                return
+
+        return super().do_POST()
 
 if __name__ == '__main__':
     os.chdir(BASE_DIR)
