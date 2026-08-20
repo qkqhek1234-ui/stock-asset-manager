@@ -16,7 +16,7 @@ export default async function handler(req, res) {
       symbol = `${symbol}.KS`;
     }
 
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=2d`;
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=5d`;
     const response = await fetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -28,9 +28,22 @@ export default async function handler(req, res) {
     }
 
     const data = await response.json();
-    const meta = data?.chart?.result?.[0]?.meta || {};
-    const currentPrice = meta.regularMarketPrice || meta.chartPreviousClose || 0;
-    const prevClose = meta.chartPreviousClose || meta.previousClose || 0;
+    const result = data?.chart?.result?.[0];
+    const meta = result?.meta || {};
+    const quotes = result?.indicators?.quote?.[0] || {};
+    const rawCloses = quotes.close || [];
+    const closes = rawCloses.filter((c) => c !== null && c !== undefined && !isNaN(c));
+
+    const currentPrice = meta.regularMarketPrice || (closes.length > 0 ? closes[closes.length - 1] : 0);
+    
+    // Exact previous close: meta.regularMarketPreviousClose -> meta.previousClose -> closes[closes.length - 2] -> meta.chartPreviousClose
+    let prevClose = meta.regularMarketPreviousClose || meta.previousClose;
+    if (!prevClose && closes.length >= 2) {
+      prevClose = closes[closes.length - 2];
+    }
+    if (!prevClose) {
+      prevClose = meta.chartPreviousClose || currentPrice;
+    }
 
     let changePercent = 0;
     if (prevClose > 0 && currentPrice) {

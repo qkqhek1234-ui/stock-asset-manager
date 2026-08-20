@@ -531,13 +531,25 @@
 
       try {
         const yahooSymbol = (clean.length === 6 && !isNaN(clean)) ? `${clean}.KS` : clean;
-        const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?interval=1d&range=2d`)}`);
+        const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(`https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?interval=1d&range=5d`)}`);
         if (res.ok) {
           const data = await res.json();
-          const meta = data.chart?.result?.[0]?.meta;
-          const cur = meta?.regularMarketPrice || meta?.chartPreviousClose;
-          const prev = meta?.chartPreviousClose || meta?.previousClose;
-          const changePercent = (prev && cur) ? ((cur - prev) / prev) * 100 : 0;
+          const result = data?.chart?.result?.[0];
+          const meta = result?.meta;
+          const quotes = result?.indicators?.quote?.[0] || {};
+          const rawCloses = quotes.close || [];
+          const closes = rawCloses.filter((c) => c !== null && c !== undefined && !isNaN(c));
+
+          const cur = meta?.regularMarketPrice || (closes.length > 0 ? closes[closes.length - 1] : 0);
+          let prev = meta?.regularMarketPreviousClose || meta?.previousClose;
+          if (!prev && closes.length >= 2) {
+            prev = closes[closes.length - 2];
+          }
+          if (!prev) {
+            prev = meta?.chartPreviousClose || cur;
+          }
+
+          const changePercent = (prev && cur && prev > 0) ? ((cur - prev) / prev) * 100 : 0;
           if (cur) {
             return {
               ticker: clean,

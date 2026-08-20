@@ -59,14 +59,24 @@ class CustomHTTPHandler(http.server.SimpleHTTPRequestHandler):
                 if symbol.isdigit() and len(symbol) == 6:
                     symbol = f"{symbol}.KS"
 
-                url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=2d"
+                url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1d&range=5d"
                 req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
                 with urllib.request.urlopen(req, timeout=5) as response:
                     data = json.loads(response.read().decode('utf-8'))
-                    meta = data.get('chart', {}).get('result', [{}])[0].get('meta', {})
-                    current_price = meta.get('regularMarketPrice') or meta.get('chartPreviousClose')
-                    prev_close = meta.get('chartPreviousClose') or meta.get('previousClose')
+                    res = data.get('chart', {}).get('result', [{}])[0]
+                    meta = res.get('meta', {})
+                    quotes = res.get('indicators', {}).get('quote', [{}])[0]
+                    raw_closes = quotes.get('close', [])
+                    closes = [c for c in raw_closes if c is not None]
+
+                    current_price = meta.get('regularMarketPrice') or (closes[-1] if closes else 0)
                     
+                    prev_close = meta.get('regularMarketPreviousClose') or meta.get('previousClose')
+                    if not prev_close and len(closes) >= 2:
+                        prev_close = closes[-2]
+                    if not prev_close:
+                        prev_close = meta.get('chartPreviousClose') or current_price
+
                     if prev_close and prev_close > 0 and current_price:
                         change_pct = round(((current_price - prev_close) / prev_close) * 100, 2)
                     else:

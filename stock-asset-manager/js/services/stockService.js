@@ -180,7 +180,7 @@ export const StockService = {
     }
 
     try {
-      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?interval=1d&range=1d`;
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol}?interval=1d&range=5d`;
       const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
 
       const controller = new AbortController();
@@ -193,16 +193,27 @@ export const StockService = {
         const data = await res.json();
         const result = data.chart?.result?.[0];
         if (result) {
-          const meta = result.meta;
-          const currentPrice = meta.regularMarketPrice || meta.chartPreviousClose;
-          const prevClose = meta.previousClose || meta.chartPreviousClose || currentPrice;
-          const changePercent = prevClose ? ((currentPrice - prevClose) / prevClose) * 100 : 0;
+          const meta = result.meta || {};
+          const quotes = result.indicators?.quote?.[0] || {};
+          const rawCloses = quotes.close || [];
+          const closes = rawCloses.filter((c) => c !== null && c !== undefined && !isNaN(c));
+
+          const currentPrice = meta.regularMarketPrice || (closes.length > 0 ? closes[closes.length - 1] : 0);
+          let prevClose = meta.regularMarketPreviousClose || meta.previousClose;
+          if (!prevClose && closes.length >= 2) {
+            prevClose = closes[closes.length - 2];
+          }
+          if (!prevClose) {
+            prevClose = meta.chartPreviousClose || currentPrice;
+          }
+
+          const changePercent = (prevClose && currentPrice && prevClose > 0) ? ((currentPrice - prevClose) / prevClose) * 100 : 0;
           const currency = meta.currency === 'KRW' ? 'KRW' : 'USD';
 
           return {
             ticker: cleanTicker,
             price: currentPrice,
-            changePercent,
+            changePercent: Math.round(changePercent * 100) / 100,
             currency,
             lastUpdated: new Date().toISOString()
           };
