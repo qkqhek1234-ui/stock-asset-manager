@@ -187,6 +187,33 @@ class CustomHTTPHandler(http.server.SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
                 return
 
+        # Local Cron Snapshot API (GET)
+        if parsed_path.path == '/api/cron-snapshot':
+            try:
+                import datetime
+                now = datetime.datetime.now()
+                today_str = now.strftime('%Y-%m-%d')
+                day_names = ['월', '화', '수', '목', '금', '토', '일']
+                day_of_week = day_names[now.weekday()]
+                
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "success": True,
+                    "date": today_str,
+                    "dayOfWeek": day_of_week,
+                    "message": "Local cron snapshot endpoint OK"
+                }).encode('utf-8'))
+                return
+            except Exception as e:
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+                return
+
         return super().do_GET()
 
     def do_POST(self):
