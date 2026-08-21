@@ -715,13 +715,32 @@
 
     async refreshAllQuotes(tickers = []) {
       const results = {};
-      const promises = tickers.map(async (item) => {
+      const uniqueTickers = [];
+      const seen = new Set();
+      
+      tickers.forEach(item => {
         const t = typeof item === 'string' ? item : item.ticker;
         const m = typeof item === 'object' ? item.market : 'US';
-        const q = await this.fetchQuote(t, m);
-        if (q) results[t.toUpperCase()] = q;
+        const clean = (t || '').trim().toUpperCase();
+        if (clean && !seen.has(clean)) {
+          seen.add(clean);
+          uniqueTickers.push({ ticker: clean, market: m });
+        }
       });
-      await Promise.allSettled(promises);
+
+      // Batch in groups of 6 with 50ms gap to avoid burst rate limiting
+      const batchSize = 6;
+      for (let i = 0; i < uniqueTickers.length; i += batchSize) {
+        const batch = uniqueTickers.slice(i, i + batchSize);
+        const batchPromises = batch.map(async ({ ticker, market }) => {
+          const q = await this.fetchQuote(ticker, market);
+          if (q) results[ticker] = q;
+        });
+        await Promise.allSettled(batchPromises);
+        if (i + batchSize < uniqueTickers.length) {
+          await new Promise(r => setTimeout(r, 50));
+        }
+      }
       return results;
     }
   };
