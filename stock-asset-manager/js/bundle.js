@@ -1442,27 +1442,29 @@
                         </div>
                       ` : '<div style="font-size: 0.74rem; color: var(--text-dim);">원금 보존</div>'}
                     </td>
-                    <td class="text-right" style="font-family: var(--font-mono);">
+                    <td class="text-right" style="font-family: var(--font-mono); white-space: nowrap;">
                       ${isUS ? `
-                        <div style="font-weight: 700; font-size: 0.95rem; color: #38bdf8;">${CalculatorService.formatCurrency(h.marketValueUSD, 'USD')}</div>
-                        <div style="font-size: 0.74rem; color: var(--text-dim); margin-top: 0.15rem;">(${CalculatorService.formatCurrency(h.marketValueKRW, 'KRW')})</div>
+                        <div style="font-weight: 700; font-size: 0.95rem; color: #38bdf8; white-space: nowrap;">${CalculatorService.formatCurrency(h.marketValueUSD, 'USD')}</div>
+                        <div style="font-size: 0.74rem; color: var(--text-dim); margin-top: 0.15rem; white-space: nowrap;">(${CalculatorService.formatCurrency(h.marketValueKRW, 'KRW')})</div>
                       ` : `
-                        <div style="font-weight: 700; font-size: 0.95rem; color: var(--text-main);">${CalculatorService.formatCurrency(h.marketValueKRW, 'KRW')}</div>
-                        <div style="font-size: 0.74rem; color: #38bdf8; margin-top: 0.15rem;">${CalculatorService.formatCurrency(h.marketValueUSD, 'USD')}</div>
+                        <div style="font-weight: 700; font-size: 0.95rem; color: var(--text-main); white-space: nowrap;">${CalculatorService.formatCurrency(h.marketValueKRW, 'KRW')}</div>
+                        <div style="font-size: 0.74rem; color: #38bdf8; margin-top: 0.15rem; white-space: nowrap;">${CalculatorService.formatCurrency(h.marketValueUSD, 'USD')}</div>
                       `}
                     </td>
-                    <td class="text-right" style="font-family: var(--font-mono);">
+                    <td class="text-right" style="font-family: var(--font-mono); white-space: nowrap;">
                       ${isCash ? `
                         <div style="color: var(--text-muted); font-size: 0.85rem;">-</div>
                       ` : isUS ? `
-                        <div class="${isP ? 'profit-text' : 'loss-text'}" style="font-weight: 700; font-size: 0.95rem;">${isP ? '+' : ''}${CalculatorService.formatCurrency(h.profitUSD, 'USD')}</div>
-                        <div style="display: flex; justify-content: flex-end; align-items: center; gap: 0.35rem; margin-top: 0.2rem;">
-                          <span class="${isP ? 'profit-text' : 'loss-text'}" style="font-size: 0.74rem; opacity: 0.85;">(${isP ? '+' : ''}${CalculatorService.formatCurrency(h.profitKRW, 'KRW')})</span>
+                        <div style="display: flex; justify-content: flex-end; align-items: center; gap: 0.35rem; white-space: nowrap;">
+                          <span class="${isP ? 'profit-text' : 'loss-text'}" style="font-weight: 700; font-size: 0.95rem;">${isP ? '+' : ''}${CalculatorService.formatCurrency(h.profitUSD, 'USD')}</span>
                           <span class="${isP ? 'profit-badge' : 'loss-badge'}" style="font-size: 0.72rem; padding: 0.08rem 0.38rem; font-weight: 700;">${CalculatorService.formatPercent(h.returnRate)}</span>
                         </div>
+                        <div class="${isP ? 'profit-text' : 'loss-text'}" style="font-size: 0.74rem; opacity: 0.85; margin-top: 0.15rem; white-space: nowrap;">
+                          (${isP ? '+' : ''}${CalculatorService.formatCurrency(h.profitKRW, 'KRW')})
+                        </div>
                       ` : `
-                        <div class="${isP ? 'profit-text' : 'loss-text'}" style="font-weight: 700; font-size: 0.92rem;">${isP ? '+' : ''}${CalculatorService.formatCurrency(h.profitKRW, 'KRW')}</div>
-                        <div style="display: flex; justify-content: flex-end; align-items: center; gap: 0.35rem; margin-top: 0.2rem;">
+                        <div class="${isP ? 'profit-text' : 'loss-text'}" style="font-weight: 700; font-size: 0.92rem; white-space: nowrap;">${isP ? '+' : ''}${CalculatorService.formatCurrency(h.profitKRW, 'KRW')}</div>
+                        <div style="display: flex; justify-content: flex-end; align-items: center; margin-top: 0.15rem; white-space: nowrap;">
                           <span class="${isP ? 'profit-badge' : 'loss-badge'}" style="font-size: 0.72rem; padding: 0.08rem 0.38rem; font-weight: 700;">${CalculatorService.formatPercent(h.returnRate)}</span>
                         </div>
                       `}
